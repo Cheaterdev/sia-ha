@@ -8,6 +8,7 @@ This integration was tested with Ajax Systems security hub only. Other SIA hubs 
 
 ## Features
 - Fire/gas tracker
+- Water leak tracker
 - Alarm tracking
 - Armed state tracking
 - Partial armed state tracking
