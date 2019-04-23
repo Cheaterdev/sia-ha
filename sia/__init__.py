@@ -100,12 +100,13 @@ class Hub:
             "TA" : [{"state":"ALARM" ,"value":True}],
             "CL" : [{"state":"STATUS" ,"value":False},{"state":"STATUS_TEMP" ,"value":False}],
             "NL" : [{"state":"STATUS" ,"value":True},{"state":"STATUS_TEMP" ,"value":False}],
-            "WA": [{"state":"LEAK","value":True}],
-            "WH": [{"state":"LEAK" ,"value":False}],
-            "GA": [{"state":"GAS","value":True}],
-            "GH": [{"state":"GAS" ,"value":False}],
+            "WA":  [{"state":"LEAK","value":True}],
+            "WH":  [{"state":"LEAK" ,"value":False}],
+            "GA":  [{"state":"GAS","value":True}],
+            "GH":  [{"state":"GAS" ,"value":False}],
             "BR" : [{"state":"ALARM","value":False}],
             "OP" : [{"state":"STATUS","value":True},{"state":"STATUS_TEMP","value":True}],
+            "RP" : []
         }
 
     def __init__(self, hass, hub_config):
@@ -120,6 +121,7 @@ class Hub:
         self._states["STATUS_TEMP"]  = SIABinarySensor("sia_status_temporal_" + self._name, "lock", hass)
     
     def manage_string(self, msg):
+       # _LOGGER.error("manage_string: " + msg )
         tipo = msg[msg.index('/')+1:msg.index('/')+3]
 
         if tipo in self.reactions:
@@ -127,6 +129,7 @@ class Hub:
             for reaction in reactions:
                 state = reaction["state"]
                 value = reaction["value"]
+                #_LOGGER.error("manageAlarmMessage: " + DOMAIN + " " + self._name + " " + state )
                 
                 self._states[state].new_state(value)
         else:
@@ -154,9 +157,11 @@ class EncriptedHub(Hub):
         Hub.__init__(self, hass, hub_config)
 
     def manage_string(self, msg):
+       # _LOGGER.error("manage_string orig: " + msg[1:] )
         iv = unhexlify("00000000000000000000000000000000")  #other vector produces invalid data at beginning
         _cipher = AES.new(self._key, AES.MODE_CBC, iv)
         data = _cipher.decrypt(unhexlify(msg[1:]))
+      #  _LOGGER.error("manage_string res: " + data.decode(encoding='UTF-8',errors='replace') )
     
         data = data[data.index(b'|'):]
         resmsg = data.decode(encoding='UTF-8',errors='replace')
@@ -254,6 +259,7 @@ class AlarmTCPHandler(socketserver.BaseRequestHandler):
     _received_data = "".encode()
 
     def handle_line(self, line):
+       # _LOGGER.error("handle_line: " + line.decode() )
         accountId = line[line.index(b'#') +1: line.index(b'[')].decode()
 
         pos = line.find(b'"')
