@@ -80,7 +80,7 @@ def setup(hass, config):
 
     for hub_config in config[DOMAIN][CONF_HUBS]:
         if CONF_PASSWORD in hub_config:
-            hass.data[DOMAIN][hub_config[CONF_ACCOUNT]] = EncriptedHub(hass, hub_config)
+            hass.data[DOMAIN][hub_config[CONF_ACCOUNT]] = EncryptedHub(hass, hub_config)
         else:
             hass.data[DOMAIN][hub_config[CONF_ACCOUNT]] = Hub(hass, hub_config)
           
@@ -121,16 +121,16 @@ class Hub:
         self._states["STATUS_TEMP"]  = SIABinarySensor("sia_status_temporal_" + self._name, "lock", hass)
     
     def manage_string(self, msg):
-       # _LOGGER.error("manage_string: " + msg )
-        tipo = msg[msg.index('/')+1:msg.index('/')+3]
+        pos = msg.find('/')        
+        assert pos>=0, "Can't find '/', message is possibly encrypted"
+        tipo = msg[pos+1:pos+3]
 
         if tipo in self.reactions:
             reactions = self.reactions[tipo]
             for reaction in reactions:
                 state = reaction["state"]
                 value = reaction["value"]
-                #_LOGGER.error("manageAlarmMessage: " + DOMAIN + " " + self._name + " " + state )
-                
+             
                 self._states[state].new_state(value)
         else:
             _LOGGER.error("unknown event: " + tipo )
@@ -141,27 +141,28 @@ class Hub:
 
 
     def process_line(self, line):
+        _LOGGER.debug("Hub.process_line" + line.decode())
         pos = line.find(ID_STRING)
+        assert pos>=0, "Can't find ID_STRING, check encryption configs"
         seq = line[pos+len(ID_STRING) : pos+len(ID_STRING)+4]
         data = line[line.index(b'[') :]
+        _LOGGER.debug("Hub.process_line found data: " + data.decode())
         self.manage_string(data.decode())
         return '"ACK"'  + (seq.decode()) + 'L0#' + (self._accountId) + '[]'
         
 
-class EncriptedHub(Hub):
+class EncryptedHub(Hub):
     def __init__(self, hass, hub_config):
         self._key = hub_config[CONF_PASSWORD].encode("utf8")
-        iv = unhexlify("00000000000000000000000000000000")  #other vector produces invalid data at beginning
+        iv = Random.new().read(AES.block_size)
         _cipher = AES.new(self._key, AES.MODE_CBC, iv)
         self._ending = hexlify(_cipher.encrypt( "00000000000000|]".encode("utf8") )).decode(encoding='UTF-8').upper()
         Hub.__init__(self, hass, hub_config)
 
     def manage_string(self, msg):
-       # _LOGGER.error("manage_string orig: " + msg[1:] )
-        iv = unhexlify("00000000000000000000000000000000")  #other vector produces invalid data at beginning
+        iv = Random.new().read(AES.block_size)
         _cipher = AES.new(self._key, AES.MODE_CBC, iv)
         data = _cipher.decrypt(unhexlify(msg[1:]))
-      #  _LOGGER.error("manage_string res: " + data.decode(encoding='UTF-8',errors='replace') )
     
         data = data[data.index(b'|'):]
         resmsg = data.decode(encoding='UTF-8',errors='replace')
@@ -169,9 +170,12 @@ class EncriptedHub(Hub):
         Hub.manage_string(self, resmsg)
 
     def process_line(self, line):
+        _LOGGER.debug("EncryptedHub.process_line" + line.decode())
         pos = line.find(ID_STRING_ENCODED)
+        assert pos>=0, "Can't find ID_STRING_ENCODED, is SIA encryption enabled?"
         seq = line[pos+len(ID_STRING_ENCODED) : pos+len(ID_STRING_ENCODED)+4]
         data = line[line.index(b'[') :]
+        _LOGGER.debug("EncryptedHub.process_line found data: " + data.decode())
         self.manage_string(data.decode())
         return '"*ACK"'  + (seq.decode()) + 'L0#' + (self._accountId) + '[' + self._ending
   
@@ -197,27 +201,22 @@ class SIABinarySensor( RestoreEntity):
 
     @property
     def name(self):
-        """Return the name of the device."""
         return self._name
 
     @property
     def state(self):
-        """Return the state of the binary sensor."""
         return STATE_ON if self.is_on else STATE_OFF
 
     @property
     def unique_id(self) -> str:
-        """Return a unique ID."""
         return self._name
 
     @property
     def available(self):
-        """Return True if entity is available."""
         return self._is_available
 
     @property
     def device_state_attributes(self):
-        """Return the state attributes."""
         attrs = {}
         return attrs
 
@@ -250,7 +249,6 @@ class SIABinarySensor( RestoreEntity):
 
     @callback
     def _async_set_unavailable(self, now):
-        """Set state to UNAVAILABLE."""
         self._remove_unavailability_tracker = None
         self._is_available = False
         self.async_schedule_update_ha_state()
@@ -258,19 +256,18 @@ class SIABinarySensor( RestoreEntity):
 class AlarmTCPHandler(socketserver.BaseRequestHandler):
     _received_data = "".encode()
 
-    def handle_line(self, line):
-       # _LOGGER.error("handle_line: " + line.decode() )
+    def handle_line(self, line):   
+        _LOGGER.debug("Income raw string: " + line.decode())     
         accountId = line[line.index(b'#') +1: line.index(b'[')].decode()
 
         pos = line.find(b'"')
+        assert pos>=0, "Can't find message beginning"
         inputMessage=line[pos:]
         msgcrc = line[0:4] 
-        codecrc = str.encode(AlarmTCPHandler.CRCCalc(inputMessage))
-
+        codecrc = str.encode(AlarmTCPHandler.CRCCalc(inputMessage))   
         try:
             if msgcrc != codecrc:
-                raise Exception('CRC mismatch')
-            
+                raise Exception('CRC mismatch')            
             if(accountId not in hass_platform.data[DOMAIN]):
                 raise Exception('Not supported account ' + accountId)
             response = hass_platform.data[DOMAIN][accountId].process_line(line)
@@ -304,7 +301,7 @@ class AlarmTCPHandler(socketserver.BaseRequestHandler):
                     
                     self.handle_line(line)
         except Exception as e: 
-            _LOGGER.error("SIA error: " + str(e))
+            _LOGGER.error( str(e))
             return
 
     @staticmethod
