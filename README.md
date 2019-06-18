@@ -16,6 +16,8 @@ This integration was tested with Ajax Systems security hub only. Other SIA hubs 
 
 ## Setup
 
+Important: Enable "Connect on demand" in Hub settings. 
+
 Place "sia" folder in **/custom_components** folder
 	
 ```yaml
