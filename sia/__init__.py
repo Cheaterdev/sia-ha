@@ -121,6 +121,8 @@ class Hub:
         self._states["STATUS_TEMP"]  = SIABinarySensor("sia_status_temporal_" + self._name, "lock", hass)
     
     def manage_string(self, msg):
+        _LOGGER.debug("manage_string: " + msg)
+        
         pos = msg.find('/')        
         assert pos>=0, "Can't find '/', message is possibly encrypted"
         tipo = msg[pos+1:pos+3]
@@ -156,14 +158,16 @@ class EncryptedHub(Hub):
         self._key = hub_config[CONF_PASSWORD].encode("utf8")
         iv = Random.new().read(AES.block_size)
         _cipher = AES.new(self._key, AES.MODE_CBC, iv)
+        self.iv2 = None
         self._ending = hexlify(_cipher.encrypt( "00000000000000|]".encode("utf8") )).decode(encoding='UTF-8').upper()
         Hub.__init__(self, hass, hub_config)
 
     def manage_string(self, msg):
-        iv = Random.new().read(AES.block_size)
+        iv = unhexlify("00000000000000000000000000000000") #where i need to find proper IV ? Only this works good.
         _cipher = AES.new(self._key, AES.MODE_CBC, iv)
         data = _cipher.decrypt(unhexlify(msg[1:]))
-    
+        _LOGGER.debug("EncryptedHub.manage_string data: " + data.decode(encoding='UTF-8',errors='replace'))
+
         data = data[data.index(b'|'):]
         resmsg = data.decode(encoding='UTF-8',errors='replace')
                
@@ -285,6 +289,7 @@ class AlarmTCPHandler(socketserver.BaseRequestHandler):
 
 
     def handle(self):
+        line = b''
         try:
             while True:
                 raw = self.request.recv(1024)
@@ -301,7 +306,7 @@ class AlarmTCPHandler(socketserver.BaseRequestHandler):
                     
                     self.handle_line(line)
         except Exception as e: 
-            _LOGGER.error( str(e))
+            _LOGGER.error(str(e)+" last line: " + line.decode())
             return
 
     @staticmethod

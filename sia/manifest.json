@@ -1,0 +1,8 @@
+{
+  "domain": "sia",
+  "name": "Sia",
+  "documentation": "",
+  "dependencies": [],
+  "codeowners": ["@cheater.dev"],
+  "requirements": []
+}
