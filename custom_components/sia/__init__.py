@@ -1,56 +1,63 @@
 import asyncio
-import logging
-import json
-import voluptuous as vol
-import sseclient
-import requests
-import time
+import base64
+from binascii import hexlify, unhexlify
 from collections import defaultdict
+from datetime import datetime, timedelta
+import json
+import logging
+import random
+import re
+import socketserver
+import string
+import sys
+import threading
+from threading import Thread
+import time
+
+from Crypto import Random
+from Crypto.Cipher import AES
+import requests
 from requests_toolbelt.utils import dump
-from homeassistant.core import callback
+import sseclient
 import voluptuous as vol
-from datetime import timedelta
+
+from homeassistant.components.binary_sensor import BinarySensorDevice
+from homeassistant.const import (
+    CONF_NAME,
+    CONF_PORT,
+    STATE_OFF,
+    STATE_ON,
+    STATE_ALARM_ARMED_AWAY,
+    STATE_ALARM_ARMED_NIGHT,
+    STATE_ALARM_DISARMED,
+)
+from homeassistant.core import callback
 from homeassistant.exceptions import TemplateError
+from homeassistant.helpers import discovery
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import Entity, async_generate_entity_id
-from homeassistant.helpers.event import async_track_state_change
-
-from threading import Thread
-from homeassistant.helpers import discovery
-from homeassistant.components.binary_sensor import BinarySensorDevice
+from homeassistant.helpers.event import (
+    async_track_point_in_utc_time,
+    async_track_state_change,
+)
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.util.dt import utcnow
 
 _LOGGER = logging.getLogger(__name__)
-from homeassistant.const import STATE_ON, STATE_OFF
 
-from homeassistant.const import CONF_NAME, CONF_PORT, CONF_PASSWORD
-import socketserver
-from datetime import datetime
-import time
-import logging
-import threading
-import sys
-import re
-
-from Crypto.Cipher import AES
-from binascii import unhexlify, hexlify
-from Crypto import Random
-import random, string, base64
-from homeassistant.helpers.event import async_track_point_in_utc_time
-from homeassistant.util.dt import utcnow
 
 DOMAIN = "sia"
 CONF_HUBS = "hubs"
 CONF_ACCOUNT = "account"
+CONF_ENCRYPTION_KEY = "encryption_key"
 
 HUB_CONFIG = vol.Schema(
     {
         vol.Required(CONF_NAME): cv.string,
         vol.Required(CONF_ACCOUNT): cv.string,
-        vol.Optional(CONF_PASSWORD): cv.string,
+        vol.Optional(CONF_ENCRYPTION_KEY): cv.string,
     }
 )
-
 
 CONFIG_SCHEMA = vol.Schema(
     {
@@ -86,7 +93,7 @@ def setup(hass, config):
     port = int(config[DOMAIN][CONF_PORT])
 
     for hub_config in config[DOMAIN][CONF_HUBS]:
-        if CONF_PASSWORD in hub_config:
+        if CONF_ENCRYPTION_KEY in hub_config:
             hass.data[DOMAIN][hub_config[CONF_ACCOUNT]] = EncryptedHub(hass, hub_config)
         else:
             hass.data[DOMAIN][hub_config[CONF_ACCOUNT]] = Hub(hass, hub_config)
@@ -109,10 +116,12 @@ class Hub:
         "CL": [
             {"state": "STATUS", "value": False},
             {"state": "STATUS_TEMP", "value": False},
+            {"state": "ALARMCONTROL", "value": STATE_ALARM_ARMED_AWAY},
         ],
         "NL": [
             {"state": "STATUS", "value": True},
             {"state": "STATUS_TEMP", "value": False},
+            {"state": "ALARMCONTROL", "value": STATE_ALARM_ARMED_NIGHT},
         ],
         "WA": [{"state": "LEAK", "value": True}],
         "WH": [{"state": "LEAK", "value": False}],
@@ -122,6 +131,7 @@ class Hub:
         "OP": [
             {"state": "STATUS", "value": True},
             {"state": "STATUS_TEMP", "value": True},
+            {"state": "ALARMCONTROL", "value": STATE_ALARM_DISARMED},
         ],
         "RP": [],
     }
@@ -143,6 +153,9 @@ class Hub:
         )
         self._states["STATUS_TEMP"] = SIABinarySensor(
             "sia_status_temporal_" + self._name, "lock", hass
+        )
+        self._states["ALARMCONTROL"] = SIAAlarmControlPanel(
+            "sia_alarmcontrol_" + self._name, STATE_ALARM_DISARMED, hass
         )
 
     def manage_string(self, msg):
@@ -178,7 +191,7 @@ class Hub:
 
 class EncryptedHub(Hub):
     def __init__(self, hass, hub_config):
-        self._key = hub_config[CONF_PASSWORD].encode("utf8")
+        self._key = hub_config[CONF_ENCRYPTION_KEY].encode("utf8")
         iv = Random.new().read(AES.block_size)
         _cipher = AES.new(self._key, AES.MODE_CBC, iv)
         self.iv2 = None
@@ -216,6 +229,89 @@ class EncryptedHub(Hub):
         return (
             '"*ACK"' + (seq.decode()) + "L0#" + (self._accountId) + "[" + self._ending
         )
+
+
+class SIAAlarmControlPanel(RestoreEntity):
+    def __init__(self, name, state, hass):
+        self._should_poll = False
+        self._name = name
+        self.hass = hass
+        self._is_available = True
+        self._state = state
+        self._remove_unavailability_tracker = None
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        state = await self.async_get_last_state()
+        if state is not None and state.state is not None:
+            self._state = state.state == STATE_ALARM_DISARMED
+        else:
+            self._state = None
+        self._async_track_unavailable()
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def state(self):
+        return self._state
+
+    @property
+    def unique_id(self) -> str:
+        return self._name
+
+    @property
+    def available(self):
+        return self._is_available
+
+    def alarm_disarm(self, code=None):
+        _LOGGER.info("Not implemented.")
+
+    def alarm_arm_home(self, code=None):
+        _LOGGER.info("Not implemented.")
+
+    def alarm_arm_away(self, code=None):
+        _LOGGER.info("Not implemented.")
+
+    def alarm_arm_night(self, code=None):
+        _LOGGER.info("Not implemented.")
+
+    def alarm_trigger(self, code=None):
+        _LOGGER.info("Not implemented.")
+
+    def alarm_arm_custom_bypass(self, code=None):
+        _LOGGER.info("Not implemented.")
+
+    @property
+    def device_state_attributes(self):
+        attrs = {}
+        return attrs
+
+    def new_state(self, state):
+        self._state = state
+        self.async_schedule_update_ha_state()
+
+    def assume_available(self):
+        self._async_track_unavailable()
+
+    @callback
+    def _async_track_unavailable(self):
+        if self._remove_unavailability_tracker:
+            self._remove_unavailability_tracker()
+        self._remove_unavailability_tracker = async_track_point_in_utc_time(
+            self.hass, self._async_set_unavailable, utcnow() + TIME_TILL_UNAVAILABLE
+        )
+        if not self._is_available:
+            self._is_available = True
+            return True
+        return False
+
+    @callback
+    def _async_set_unavailable(self, now):
+        self._remove_unavailability_tracker = None
+        self._is_available = False
+        self.async_schedule_update_ha_state()
 
 
 class SIABinarySensor(RestoreEntity):

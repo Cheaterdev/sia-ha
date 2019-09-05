@@ -3,6 +3,6 @@
   "name": "Sia",
   "documentation": "",
   "dependencies": [],
-  "codeowners": ["@cheater.dev"],
+  "codeowners": ["@cheater.dev", "@eavanvalkenburg"],
   "requirements": []
 }
