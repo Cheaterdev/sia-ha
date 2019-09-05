@@ -98,7 +98,7 @@ def setup(hass, config):
         else:
             hass.data[DOMAIN][hub_config[CONF_ACCOUNT]] = Hub(hass, hub_config)
 
-    for component in ["binary_sensor"]:
+    for component in ["binary_sensor", "alarm_control_panel"]:
         discovery.load_platform(hass, component, DOMAIN, {}, config)
 
     server = socketserver.TCPServer(("", port), AlarmTCPHandler)

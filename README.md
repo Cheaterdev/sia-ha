@@ -38,7 +38,7 @@ sia:
   hubs:
     - name: **name**
       account: **account**
-      password: *password*
+      encryption_key: *password*
   
 ```
 
@@ -47,7 +47,7 @@ Configuration variables:
 - **hubs** (*Required*): List of hubs
 - **name** (*Required*): Used to generate sensor ids.
 - **account** (*Required*): Hub account to track. 3-16 ASCII hex characters. Must be same, as in hub properties.
-- **password** (*Optional*): Encoding key. 16 ASCII characters. Must be same, as in hub properties.
+- **encryption_key** (*Optional*): Encoding key. 16 ASCII characters. Must be same, as in hub properties.
 
 ## Disclaimer
 This software is supplied "AS IS" without any warranties and support.

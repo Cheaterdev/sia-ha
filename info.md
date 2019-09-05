@@ -27,11 +27,11 @@ Platform | Description
 
 ```yaml
 sia:
-  port:  **port**
+  port:  port
   hubs:
-    - name: **name**
-      account: **account**
-      password: *password*
+    - name: name
+      account: account
+      encryption_key: password
 ```
 
 ## Configuration options
@@ -42,7 +42,7 @@ Key | Type | Required | Description
 `hubs` | `list` | `True` | List of all hubs to connect to.
 `name` | `string` | `True` | Used to generate sensor ids.
 `account` | `string` | `True` |  Hub account to track. 3-16 ASCII hex characters. Must be same, as in hub properties.
-`password` | `string` | `False` | Encoding key. 16 ASCII characters. Must be same, as in hub properties.
+`encryption_key` | `string` | `False` | Encoding key. 16 ASCII characters. Must be same, as in hub properties.
 
 ASCII characters are 0-9 and ABCDEF, so a account is something like `346EB` and the encryption key is the same but 16 characters.
 
