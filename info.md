@@ -7,6 +7,7 @@ _Component to integrate with [SIA][sia], based on [CheaterDev's version][ch_sia]
 Platform | Description
 -- | --
 `binary_sensor` | Show something `True` or `False`.
+`alarm_control_panel` | Alarm panel
 
 ## Features
 - Fire/gas tracker
@@ -14,6 +15,7 @@ Platform | Description
 - Alarm tracking
 - Armed state tracking
 - Partial armed state tracking
+- Alarm panel for status in Alarm Panel visual
 - AES-128 CBC encryption support
 
 {% if not installed %}
