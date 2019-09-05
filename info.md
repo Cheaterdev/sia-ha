@@ -52,3 +52,4 @@ ASCII characters are 0-9 and ABCDEF, so a account is something like `346EB` and 
 [sia]: https://github.com/eavanvalkenburg/sia-ha
 [ch_sia]: https://github.com/Cheaterdev/sia-ha
 [hacs]: https://github.com/custom-components/hacs
+[hacsbadge]: https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge
