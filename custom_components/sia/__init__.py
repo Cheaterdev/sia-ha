@@ -19,12 +19,12 @@ from threading import Thread
 from homeassistant.helpers import discovery
 from homeassistant.components.binary_sensor import BinarySensorDevice
 from homeassistant.helpers.restore_state import RestoreEntity
-_LOGGER = logging.getLogger(__name__)
-from homeassistant.const import (STATE_ON, STATE_OFF)
 
-from homeassistant.const import (
-    CONF_NAME, CONF_PORT, CONF_PASSWORD)
-import socketserver 
+_LOGGER = logging.getLogger(__name__)
+from homeassistant.const import STATE_ON, STATE_OFF
+
+from homeassistant.const import CONF_NAME, CONF_PORT, CONF_PASSWORD
+import socketserver
 from datetime import datetime
 import time
 import logging
@@ -33,38 +33,45 @@ import sys
 import re
 
 from Crypto.Cipher import AES
-from binascii import unhexlify,hexlify
+from binascii import unhexlify, hexlify
 from Crypto import Random
 import random, string, base64
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.util.dt import utcnow
 
-DOMAIN = 'sia'
-CONF_HUBS = 'hubs'
-CONF_ACCOUNT = 'account'
+DOMAIN = "sia"
+CONF_HUBS = "hubs"
+CONF_ACCOUNT = "account"
 
-HUB_CONFIG = vol.Schema({
-    vol.Required(CONF_NAME): cv.string,
-    vol.Required(CONF_ACCOUNT): cv.string,
-    vol.Optional(CONF_PASSWORD):cv.string,
-})
+HUB_CONFIG = vol.Schema(
+    {
+        vol.Required(CONF_NAME): cv.string,
+        vol.Required(CONF_ACCOUNT): cv.string,
+        vol.Optional(CONF_PASSWORD): cv.string,
+    }
+)
 
 
-
-CONFIG_SCHEMA = vol.Schema({
-    DOMAIN: vol.Schema({
-        vol.Required(CONF_PORT): cv.string,
-        vol.Required(CONF_HUBS, default={}):
-            vol.All(cv.ensure_list, [HUB_CONFIG]),
-    }),
-}, extra=vol.ALLOW_EXTRA)
+CONFIG_SCHEMA = vol.Schema(
+    {
+        DOMAIN: vol.Schema(
+            {
+                vol.Required(CONF_PORT): cv.string,
+                vol.Required(CONF_HUBS, default={}): vol.All(
+                    cv.ensure_list, [HUB_CONFIG]
+                ),
+            }
+        )
+    },
+    extra=vol.ALLOW_EXTRA,
+)
 
 ID_STRING = '"SIA-DCS"'.encode()
 ID_STRING_ENCODED = '"*SIA-DCS"'.encode()
 
 TIME_TILL_UNAVAILABLE = timedelta(minutes=3)
 
-ID_R='\r'.encode()
+ID_R = "\r".encode()
 
 hass_platform = None
 
@@ -83,75 +90,91 @@ def setup(hass, config):
             hass.data[DOMAIN][hub_config[CONF_ACCOUNT]] = EncryptedHub(hass, hub_config)
         else:
             hass.data[DOMAIN][hub_config[CONF_ACCOUNT]] = Hub(hass, hub_config)
-          
-    for component in ['binary_sensor']:
-       discovery.load_platform(hass, component, DOMAIN, {}, config)
+
+    for component in ["binary_sensor"]:
+        discovery.load_platform(hass, component, DOMAIN, {}, config)
 
     server = socketserver.TCPServer(("", port), AlarmTCPHandler)
 
     t = threading.Thread(target=server.serve_forever)
     t.start()
-    
+
     return True
 
+
 class Hub:
-    reactions = {            
-            "BA" : [{"state":"ALARM","value":True}],
-            "TA" : [{"state":"ALARM" ,"value":True}],
-            "CL" : [{"state":"STATUS" ,"value":False},{"state":"STATUS_TEMP" ,"value":False}],
-            "NL" : [{"state":"STATUS" ,"value":True},{"state":"STATUS_TEMP" ,"value":False}],
-            "WA":  [{"state":"LEAK","value":True}],
-            "WH":  [{"state":"LEAK" ,"value":False}],
-            "GA":  [{"state":"GAS","value":True}],
-            "GH":  [{"state":"GAS" ,"value":False}],
-            "BR" : [{"state":"ALARM","value":False}],
-            "OP" : [{"state":"STATUS","value":True},{"state":"STATUS_TEMP","value":True}],
-            "RP" : []
-        }
+    reactions = {
+        "BA": [{"state": "ALARM", "value": True}],
+        "TA": [{"state": "ALARM", "value": True}],
+        "CL": [
+            {"state": "STATUS", "value": False},
+            {"state": "STATUS_TEMP", "value": False},
+        ],
+        "NL": [
+            {"state": "STATUS", "value": True},
+            {"state": "STATUS_TEMP", "value": False},
+        ],
+        "WA": [{"state": "LEAK", "value": True}],
+        "WH": [{"state": "LEAK", "value": False}],
+        "GA": [{"state": "GAS", "value": True}],
+        "GH": [{"state": "GAS", "value": False}],
+        "BR": [{"state": "ALARM", "value": False}],
+        "OP": [
+            {"state": "STATUS", "value": True},
+            {"state": "STATUS_TEMP", "value": True},
+        ],
+        "RP": [],
+    }
 
     def __init__(self, hass, hub_config):
         self._name = hub_config[CONF_NAME]
         self._accountId = hub_config[CONF_ACCOUNT]
         self._hass = hass
         self._states = {}
-        self._states["LEAK"] = SIABinarySensor("sia_leak_" + self._name,"moisture" , hass)
-        self._states["GAS"] = SIABinarySensor("sia_gas_" + self._name,"smoke", hass)
-        self._states["ALARM"]  = SIABinarySensor("sia_alarm_" + self._name,"safety", hass)
-        self._states["STATUS"]  = SIABinarySensor("sia_status_" + self._name, "lock", hass)
-        self._states["STATUS_TEMP"]  = SIABinarySensor("sia_status_temporal_" + self._name, "lock", hass)
-    
+        self._states["LEAK"] = SIABinarySensor(
+            "sia_leak_" + self._name, "moisture", hass
+        )
+        self._states["GAS"] = SIABinarySensor("sia_gas_" + self._name, "smoke", hass)
+        self._states["ALARM"] = SIABinarySensor(
+            "sia_alarm_" + self._name, "safety", hass
+        )
+        self._states["STATUS"] = SIABinarySensor(
+            "sia_status_" + self._name, "lock", hass
+        )
+        self._states["STATUS_TEMP"] = SIABinarySensor(
+            "sia_status_temporal_" + self._name, "lock", hass
+        )
+
     def manage_string(self, msg):
-        _LOGGER.debug("manage_string: " + msg)
-        
-        pos = msg.find('/')        
-        assert pos>=0, "Can't find '/', message is possibly encrypted"
-        tipo = msg[pos+1:pos+3]
+        _LOGGER.info("manage_string: " + msg)
+
+        pos = msg.find("/")
+        assert pos >= 0, "Can't find '/', message is possibly encrypted"
+        tipo = msg[pos + 1 : pos + 3]
 
         if tipo in self.reactions:
             reactions = self.reactions[tipo]
             for reaction in reactions:
                 state = reaction["state"]
                 value = reaction["value"]
-             
+
                 self._states[state].new_state(value)
         else:
-            _LOGGER.error("unknown event: " + tipo )
-        
+            _LOGGER.error("unknown event: " + tipo)
+
         for device in self._states:
-           self._states[device].assume_available()
-
-
+            self._states[device].assume_available()
 
     def process_line(self, line):
         _LOGGER.debug("Hub.process_line" + line.decode())
         pos = line.find(ID_STRING)
-        assert pos>=0, "Can't find ID_STRING, check encryption configs"
-        seq = line[pos+len(ID_STRING) : pos+len(ID_STRING)+4]
-        data = line[line.index(b'[') :]
-        _LOGGER.debug("Hub.process_line found data: " + data.decode())
+        assert pos >= 0, "Can't find ID_STRING, check encryption configs"
+        seq = line[pos + len(ID_STRING) : pos + len(ID_STRING) + 4]
+        data = line[line.index(b"[") :]
+        _LOGGER.info("Hub.process_line found data: " + data.decode())
         self.manage_string(data.decode())
-        return '"ACK"'  + (seq.decode()) + 'L0#' + (self._accountId) + '[]'
-        
+        return '"ACK"' + (seq.decode()) + "L0#" + (self._accountId) + "[]"
+
 
 class EncryptedHub(Hub):
     def __init__(self, hass, hub_config):
@@ -159,34 +182,44 @@ class EncryptedHub(Hub):
         iv = Random.new().read(AES.block_size)
         _cipher = AES.new(self._key, AES.MODE_CBC, iv)
         self.iv2 = None
-        self._ending = hexlify(_cipher.encrypt( "00000000000000|]".encode("utf8") )).decode(encoding='UTF-8').upper()
+        self._ending = (
+            hexlify(_cipher.encrypt("00000000000000|]".encode("utf8")))
+            .decode(encoding="UTF-8")
+            .upper()
+        )
         Hub.__init__(self, hass, hub_config)
 
     def manage_string(self, msg):
-        iv = unhexlify("00000000000000000000000000000000") #where i need to find proper IV ? Only this works good.
+        iv = unhexlify(
+            "00000000000000000000000000000000"
+        )  # where i need to find proper IV ? Only this works good.
         _cipher = AES.new(self._key, AES.MODE_CBC, iv)
         data = _cipher.decrypt(unhexlify(msg[1:]))
-        _LOGGER.debug("EncryptedHub.manage_string data: " + data.decode(encoding='UTF-8',errors='replace'))
+        _LOGGER.debug(
+            "EncryptedHub.manage_string data: "
+            + data.decode(encoding="UTF-8", errors="replace")
+        )
 
-        data = data[data.index(b'|'):]
-        resmsg = data.decode(encoding='UTF-8',errors='replace')
-               
+        data = data[data.index(b"|") :]
+        resmsg = data.decode(encoding="UTF-8", errors="replace")
+
         Hub.manage_string(self, resmsg)
 
     def process_line(self, line):
         _LOGGER.debug("EncryptedHub.process_line" + line.decode())
         pos = line.find(ID_STRING_ENCODED)
-        assert pos>=0, "Can't find ID_STRING_ENCODED, is SIA encryption enabled?"
-        seq = line[pos+len(ID_STRING_ENCODED) : pos+len(ID_STRING_ENCODED)+4]
-        data = line[line.index(b'[') :]
+        assert pos >= 0, "Can't find ID_STRING_ENCODED, is SIA encryption enabled?"
+        seq = line[pos + len(ID_STRING_ENCODED) : pos + len(ID_STRING_ENCODED) + 4]
+        data = line[line.index(b"[") :]
         _LOGGER.debug("EncryptedHub.process_line found data: " + data.decode())
         self.manage_string(data.decode())
-        return '"*ACK"'  + (seq.decode()) + 'L0#' + (self._accountId) + '[' + self._ending
-  
-        
+        return (
+            '"*ACK"' + (seq.decode()) + "L0#" + (self._accountId) + "[" + self._ending
+        )
 
-class SIABinarySensor( RestoreEntity):
-    def __init__(self,  name, device_class, hass):
+
+class SIABinarySensor(RestoreEntity):
+    def __init__(self, name, device_class, hass):
         self._device_class = device_class
         self._should_poll = False
         self._name = name
@@ -196,7 +229,7 @@ class SIABinarySensor( RestoreEntity):
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
-        state = await self.async_get_last_state()        
+        state = await self.async_get_last_state()
         if state is not None and state.state is not None:
             self._state = state.state == STATE_ON
         else:
@@ -232,7 +265,7 @@ class SIABinarySensor( RestoreEntity):
     def is_on(self):
         return self._state
 
-    def new_state(self, state):   
+    def new_state(self, state):
         self._state = state
         self.async_schedule_update_ha_state()
 
@@ -244,8 +277,8 @@ class SIABinarySensor( RestoreEntity):
         if self._remove_unavailability_tracker:
             self._remove_unavailability_tracker()
         self._remove_unavailability_tracker = async_track_point_in_utc_time(
-            self.hass, self._async_set_unavailable,
-            utcnow() + TIME_TILL_UNAVAILABLE)
+            self.hass, self._async_set_unavailable, utcnow() + TIME_TILL_UNAVAILABLE
+        )
         if not self._is_available:
             self._is_available = True
             return True
@@ -257,39 +290,41 @@ class SIABinarySensor( RestoreEntity):
         self._is_available = False
         self.async_schedule_update_ha_state()
 
+
 class AlarmTCPHandler(socketserver.BaseRequestHandler):
     _received_data = "".encode()
 
-    def handle_line(self, line):   
-        _LOGGER.debug("Income raw string: " + line.decode())     
-        accountId = line[line.index(b'#') +1: line.index(b'[')].decode()
+    def handle_line(self, line):
+        _LOGGER.debug("Income raw string: " + line.decode())
+        accountId = line[line.index(b"#") + 1 : line.index(b"[")].decode()
 
         pos = line.find(b'"')
-        assert pos>=0, "Can't find message beginning"
-        inputMessage=line[pos:]
-        msgcrc = line[0:4] 
-        codecrc = str.encode(AlarmTCPHandler.CRCCalc(inputMessage))   
+        assert pos >= 0, "Can't find message beginning"
+        inputMessage = line[pos:]
+        msgcrc = line[0:4]
+        codecrc = str.encode(AlarmTCPHandler.CRCCalc(inputMessage))
         try:
             if msgcrc != codecrc:
-                raise Exception('CRC mismatch')            
-            if(accountId not in hass_platform.data[DOMAIN]):
-                raise Exception('Not supported account ' + accountId)
+                raise Exception("CRC mismatch")
+            if accountId not in hass_platform.data[DOMAIN]:
+                raise Exception("Not supported account " + accountId)
             response = hass_platform.data[DOMAIN][accountId].process_line(line)
         except Exception as e:
             _LOGGER.error(str(e))
-            timestamp = datetime.fromtimestamp(time.time()).strftime('_%H:%M:%S,%m-%d-%Y')
+            timestamp = datetime.fromtimestamp(time.time()).strftime(
+                "_%H:%M:%S,%m-%d-%Y"
+            )
             response = '"NAK"0000L0R0A0[]' + timestamp
 
-        header = ('%04x' % len(response)).upper()
+        header = ("%04x" % len(response)).upper()
         CRC = AlarmTCPHandler.CRCCalc2(response)
-        response="\n" + CRC + header + response + "\r"
+        response = "\n" + CRC + header + response + "\r"
 
         byte_response = str.encode(response)
         self.request.sendall(byte_response)
 
-
     def handle(self):
-        line = b''
+        line = b""
         try:
             while True:
                 raw = self.request.recv(1024)
@@ -297,42 +332,42 @@ class AlarmTCPHandler(socketserver.BaseRequestHandler):
                     return
                 raw = bytearray(raw)
                 while True:
-                    splitter = raw.find(b'\r')
-                    if splitter> -1:
+                    splitter = raw.find(b"\r")
+                    if splitter > -1:
                         line = raw[1:splitter]
-                        raw = raw[splitter+1:]
+                        raw = raw[splitter + 1 :]
                     else:
                         break
-                    
+
                     self.handle_line(line)
-        except Exception as e: 
-            _LOGGER.error(str(e)+" last line: " + line.decode())
+        except Exception as e:
+            _LOGGER.error(str(e) + " last line: " + line.decode())
             return
 
     @staticmethod
     def CRCCalc(msg):
-        CRC=0
+        CRC = 0
         for letter in msg:
-            temp=(letter)
-            for j in range(0,8):  # @UnusedVariable
+            temp = letter
+            for j in range(0, 8):  # @UnusedVariable
                 temp ^= CRC & 1
                 CRC >>= 1
                 if (temp & 1) != 0:
                     CRC ^= 0xA001
                 temp >>= 1
-                
-        return ('%x' % CRC).upper().zfill(4)
-    
+
+        return ("%x" % CRC).upper().zfill(4)
+
     @staticmethod
     def CRCCalc2(msg):
-        CRC=0
+        CRC = 0
         for letter in msg:
-            temp=ord(letter)
-            for j in range(0,8):  # @UnusedVariable
+            temp = ord(letter)
+            for j in range(0, 8):  # @UnusedVariable
                 temp ^= CRC & 1
                 CRC >>= 1
                 if (temp & 1) != 0:
                     CRC ^= 0xA001
                 temp >>= 1
-                
-        return ('%x' % CRC).upper().zfill(4)
+
+        return ("%x" % CRC).upper().zfill(4)
