@@ -28,7 +28,7 @@ Platform | Description
 4. Insert Home Assistant IP adress. It must be visible to hub. There is no cloud connection to it.
 5. Insert Home Assistant listening port. This port must not be used with anything else.
 6. Select Preferred Network. Ethernet is preferred if hub and HA in same network. Multiple networks are not tested.
-7. Enable Periodic Reports. It must be smaller than 5 mins. If more - HA will mark hub as unavailable.
+7. Enable Periodic Reports. The interval with which the alarm systems reports to the monitoring station, default is 1 minute. This component adds 30 seconds before setting the alarm unavailable to deal with slights latencies between ajax and HA and the async nature of HA.
 8. Encryption is on your risk. There is no CPU or network hit, so it's preferred. Password is 16 ASCII characters.
 {% if not installed %}
 ## Installation
@@ -57,6 +57,7 @@ sia:
     - name: hubname
       account: account
       encryption_key: password
+      ping_interval: pinginterval
       zones:
         - zone: 1
           name: zonename
@@ -75,6 +76,7 @@ Key | Type | Required | Description
 `name` | `string` | `True` | Used to generate sensor ids.
 `account` | `string` | `True` |  Hub account to track. 3-16 ASCII hex characters. Must be same, as in hub properties.
 `encryption_key` | `string` | `False` | Encoding key. 16 ASCII characters. Must be same, as in hub properties.
+`ping_interval` | `int` | `False` | Ping interval in minutes that the alarm system uses to send "Automatic communication test report" messages, the HA component adds 30 seconds before marking a device unavailable. Must be between 1 and 1440 minutes.
 `zones` | `list` | `False` | Manual definition of all zones present, if unspecified, only the hub sensor is added, and new sensors are added based on messages coming in.
 `zone` | `int` | `False` | ZoneID, must match the zone that the system sends, can be found in the log but also "discovered"
 `name` | `string` | `False` | Zone name, is used for the friendly name of your sensors, when you have the same sensortypes in multiple zones and this is not set, a `_1, _2, etc` is added by HA automatically.

@@ -21,20 +21,16 @@ from requests_toolbelt.utils import dump
 import sseclient
 import voluptuous as vol
 
-from homeassistant.components.binary_sensor import (
-    BinarySensorDevice,
-    DEVICE_CLASS_SMOKE,
-    DEVICE_CLASS_MOISTURE,
-)
-from homeassistant.components.binary_sensor import (
-    ENTITY_ID_FORMAT as BINARY_SENSOR_FORMAT,
-)
-from homeassistant.components.alarm_control_panel import AlarmControlPanel
 from homeassistant.components.alarm_control_panel import (
     ENTITY_ID_FORMAT as ALARM_FORMAT,
+    AlarmControlPanel,
 )
-
-# from homeassistant.components.sensor import SensorDevice
+from homeassistant.components.binary_sensor import (
+    DEVICE_CLASS_MOISTURE,
+    DEVICE_CLASS_SMOKE,
+    ENTITY_ID_FORMAT as BINARY_SENSOR_FORMAT,
+    BinarySensorDevice,
+)
 from homeassistant.components.sensor import ENTITY_ID_FORMAT as SENSOR_FORMAT
 from homeassistant.const import (
     ATTR_FRIENDLY_NAME,
@@ -43,12 +39,13 @@ from homeassistant.const import (
     CONF_SENSORS,
     CONF_ZONE,
     DEVICE_CLASS_TIMESTAMP,
-    STATE_OFF,
-    STATE_ON,
     STATE_ALARM_ARMED_AWAY,
+    STATE_ALARM_ARMED_CUSTOM_BYPASS,
     STATE_ALARM_ARMED_NIGHT,
     STATE_ALARM_DISARMED,
     STATE_ALARM_TRIGGERED,
+    STATE_OFF,
+    STATE_ON,
 )
 from homeassistant.core import callback
 from homeassistant.exceptions import TemplateError
@@ -66,27 +63,18 @@ from .sia_codes import SIACodes
 
 _LOGGER = logging.getLogger(__name__)
 
-# sia:
-#     port:
-#     hubs:
-#         - name:
-#           account:
-#           encryption_key:
-#           zones:
-#             - zone: 1
-#               sensors:
-#                 - leak
-#                 - alarm
-#                 - gas
-
 DOMAIN = "sia"
-CONF_HUBS = "hubs"
+
 CONF_ACCOUNT = "account"
 CONF_ENCRYPTION_KEY = "encryption_key"
+CONF_HUBS = "hubs"
+CONF_PING_INTERVAL = "ping_interval"
 CONF_ZONES = "zones"
-HUB_SENSOR_NAME = "_last_heartbeat"
 
 DEVICE_CLASS_ALARM = "alarm"
+HUB_SENSOR_NAME = "_last_heartbeat"
+HUB_ZONE = 0
+
 TYPES = [DEVICE_CLASS_ALARM, DEVICE_CLASS_MOISTURE, DEVICE_CLASS_SMOKE]
 
 ZONE_CONFIG = vol.Schema(
@@ -104,6 +92,9 @@ HUB_CONFIG = vol.Schema(
         vol.Required(CONF_NAME): cv.string,
         vol.Required(CONF_ACCOUNT): cv.string,
         vol.Optional(CONF_ENCRYPTION_KEY): cv.string,
+        vol.Optional(CONF_PING_INTERVAL, default=1): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=1440)
+        ),
         vol.Optional(CONF_ZONES, default=[]): vol.All(cv.ensure_list, [ZONE_CONFIG]),
     }
 )
@@ -124,10 +115,9 @@ CONFIG_SCHEMA = vol.Schema(
 
 ID_STRING = '"SIA-DCS"'.encode()
 ID_STRING_ENCODED = '"*SIA-DCS"'.encode()
-
-TIME_TILL_UNAVAILABLE = timedelta(minutes=3)
-
 ID_R = "\r".encode()
+
+PING_INTERVAL_MARGIN = timedelta(seconds=30)
 
 hass_platform = None
 
@@ -170,17 +160,29 @@ class Hub:
     # main set of responses to certain codes from SIA (see sia_codes for all of them)
     reactions = {
         "BA": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_TRIGGERED},
-        "TA": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_TRIGGERED},
+        "BR": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_DISARMED},
+        "CA": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_ARMED_AWAY},
+        "CF": {
+            "type": DEVICE_CLASS_ALARM,
+            "new_state": STATE_ALARM_ARMED_CUSTOM_BYPASS,
+        },
+        "CG": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_ARMED_AWAY},
         "CL": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_ARMED_AWAY},
-        "NL": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_ARMED_NIGHT},
-        "WA": {"type": DEVICE_CLASS_MOISTURE, "new_state": True},
-        "WH": {"type": DEVICE_CLASS_MOISTURE, "new_state": False},
+        "CP": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_ARMED_AWAY},
+        "CQ": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_ARMED_AWAY},
         "GA": {"type": DEVICE_CLASS_SMOKE, "new_state": True},
         "GH": {"type": DEVICE_CLASS_SMOKE, "new_state": False},
-        "BR": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_DISARMED},
+        "NL": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_ARMED_NIGHT},
+        "OA": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_DISARMED},
+        "OG": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_DISARMED},
         "OP": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_DISARMED},
-        "YG": {"type": DEVICE_CLASS_TIMESTAMP, "attr": True},
+        "OQ": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_DISARMED},
+        "OR": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_DISARMED},
         "RP": {"type": DEVICE_CLASS_TIMESTAMP, "new_state_eval": "utcnow()"},
+        "TA": {"type": DEVICE_CLASS_ALARM, "new_state": STATE_ALARM_TRIGGERED},
+        "WA": {"type": DEVICE_CLASS_MOISTURE, "new_state": True},
+        "WH": {"type": DEVICE_CLASS_MOISTURE, "new_state": False},
+        "YG": {"type": DEVICE_CLASS_TIMESTAMP, "attr": True},
     }
 
     def __init__(self, hass, hub_config):
@@ -190,8 +192,9 @@ class Hub:
         self._states = {}
         self._zones = hub_config.get(CONF_ZONES)
         self._entity_ids = []
+        self._ping_interval = timedelta(minutes=hub_config.get(CONF_PING_INTERVAL))
         # create the hub sensor
-        self._upsert_sensor(0, DEVICE_CLASS_TIMESTAMP)
+        self._upsert_sensor(HUB_ZONE, DEVICE_CLASS_TIMESTAMP)
         # add sensors for each zone as specified in the config.
         for z in self._zones:
             for s in z.get(CONF_SENSORS):
@@ -210,10 +213,17 @@ class Hub:
             new_state_eval = reaction.get("new_state_eval")
             # do the work (can be more than 1)
             if new_state or new_state_eval:
+                _LOGGER.debug(
+                    "Will set state for entity: "
+                    + entity_id
+                    + " to state: "
+                    + (new_state if new_state else new_state_eval)
+                )
                 self._states[entity_id].state = (
                     new_state if new_state else eval(new_state_eval)
                 )
             if attr:
+                _LOGGER.debug("Will set attribute entity: " + entity_id)
                 self._states[entity_id].add_attribute(
                     {
                         "Last message": utcnow().isoformat()
@@ -231,6 +241,24 @@ class Hub:
         for e in self._entity_ids:
             self._states[e].assume_available()
 
+    def _parse_message(self, msg):
+        """ Parses the message and finds the SIA."""
+        parts = msg.split("|")[2].split("]")[0].split("/")
+        zoneID = parts[0][3:]
+        message = parts[1]
+        sia = SIACodes(message[0:2])
+        _LOGGER.debug(
+            "Incoming parsed: "
+            + msg
+            + " to sia: "
+            + str(sia)
+            + " for zone: "
+            + zoneID
+            + " with message: "
+            + message
+        )
+        return sia, zoneID, message
+
     def _upsert_sensor(self, zone, sensor_type):
         """ checks if the entity exists, and creates otherwise. always gives back the entity_id """
         sensor_name = self._get_sensor_name(zone, sensor_type)
@@ -239,7 +267,7 @@ class Hub:
             zone_found = False
             for z in self._zones:
                 # if the zone exists then a sensor is missing,
-                # so, find the zone and add the missing sensor
+                # so, get the zone and add the missing sensor
                 if z[CONF_ZONE] == zone:
                     z[CONF_SENSORS].append(sensor_type)
                     zone_found = True
@@ -247,26 +275,22 @@ class Hub:
             if not zone_found:
                 # if zone does not exist, add it with the sensor and no name
                 self._zones.append({CONF_ZONE: zone, CONF_SENSORS: [sensor_type]})
-            
+
             # add the new sensor
             constructor = self.sensor_types_classes.get(sensor_type)
             if constructor:
                 self._states[entity_id] = eval(constructor)(
-                    entity_id, sensor_name, sensor_type, self._hass
+                    entity_id,
+                    sensor_name,
+                    sensor_type,
+                    zone,
+                    self._ping_interval,
+                    self._hass,
                 )
             else:
                 _LOGGER.warning("Unknown device type: " + sensor_type)
             self._entity_ids.append(entity_id)
         return entity_id
-
-    def _parse_message(self, msg):
-        """ Parses the message and finds the SIA."""
-        _LOGGER.debug("Parsing: " + msg)
-        parts = msg.split("|")[2].split("]")[0].split("/")
-        zoneID = parts[0][3:]
-        message = parts[1]
-        sia = SIACodes(message[0:2])
-        return sia, zoneID, message
 
     def _get_entity_id(self, zone=0, sensor_type=None):
         """ Gives back a entity_id according to the variables, defaults to the hub sensor entity_id. """
@@ -303,12 +327,12 @@ class Hub:
         return next((z.get(CONF_NAME) for z in self._zones if z.get(CONF_ZONE) == zone))
 
     def process_line(self, line):
-        _LOGGER.debug("Hub.process_line" + line.decode())
+        # _LOGGER.debug("Hub.process_line" + line.decode())
         pos = line.find(ID_STRING)
         assert pos >= 0, "Can't find ID_STRING, check encryption configs"
         seq = line[pos + len(ID_STRING) : pos + len(ID_STRING) + 4]
         data = line[line.index(b"[") :]
-        _LOGGER.debug("Hub.process_line found data: " + data.decode())
+        # _LOGGER.debug("Hub.process_line found data: " + data.decode())
         self._update_states(*self._parse_message(data.decode()))
         return '"ACK"' + (seq.decode()) + "L0#" + (self._accountId) + "[]"
 
@@ -332,22 +356,22 @@ class EncryptedHub(Hub):
         )  # where i need to find proper IV ? Only this works good.
         _cipher = AES.new(self._key, AES.MODE_CBC, iv)
         data = _cipher.decrypt(unhexlify(msg[1:]))
-        _LOGGER.debug(
-            "EncryptedHub.manage_string data: "
-            + data.decode(encoding="UTF-8", errors="replace")
-        )
+        # _LOGGER.debug(
+        #     "EncryptedHub.manage_string data: "
+        #     + data.decode(encoding="UTF-8", errors="replace")
+        # )
 
         data = data[data.index(b"|") :]
         resmsg = data.decode(encoding="UTF-8", errors="replace")
         Hub._update_states(self, *Hub._parse_message(self, resmsg))
 
     def process_line(self, line):
-        _LOGGER.debug("EncryptedHub.process_line" + line.decode())
+        # _LOGGER.debug("EncryptedHub.process_line" + line.decode())
         pos = line.find(ID_STRING_ENCODED)
         assert pos >= 0, "Can't find ID_STRING_ENCODED, is SIA encryption enabled?"
         seq = line[pos + len(ID_STRING_ENCODED) : pos + len(ID_STRING_ENCODED) + 4]
         data = line[line.index(b"[") :]
-        _LOGGER.debug("EncryptedHub.process_line found data: " + data.decode())
+        # _LOGGER.debug("EncryptedHub.process_line found data: " + data.decode())
         self._manage_string(data.decode())
         return (
             '"*ACK"' + (seq.decode()) + "L0#" + (self._accountId) + "[" + self._ending
@@ -355,13 +379,15 @@ class EncryptedHub(Hub):
 
 
 class SIAAlarmControlPanel(RestoreEntity):
-    def __init__(self, entity_id, name, device_class, hass):
+    def __init__(self, entity_id, name, device_class, zone, ping_interval, hass):
         self._should_poll = False
         self.entity_id = generate_entity_id(
             entity_id_format=ALARM_FORMAT, name=entity_id, hass=hass
         )
         self._name = name
         self.hass = hass
+        self._ping_interval = ping_interval
+        self._attr = {CONF_PING_INTERVAL: self.ping_interval, CONF_ZONE: zone}
         self._is_available = True
         self._remove_unavailability_tracker = None
 
@@ -377,6 +403,8 @@ class SIAAlarmControlPanel(RestoreEntity):
                 self._state = STATE_ALARM_TRIGGERED
             elif state.state == STATE_ALARM_DISARMED:
                 self._state = STATE_ALARM_DISARMED
+            elif state.state == STATE_ALARM_ARMED_CUSTOM_BYPASS:
+                self._state = STATE_ALARM_ARMED_CUSTOM_BYPASS
             else:
                 self._state = None
         else:
@@ -386,6 +414,10 @@ class SIAAlarmControlPanel(RestoreEntity):
     @property
     def name(self):
         return self._name
+
+    @property
+    def ping_interval(self):
+        return str(self._ping_interval)
 
     @property
     def state(self):
@@ -419,8 +451,7 @@ class SIAAlarmControlPanel(RestoreEntity):
 
     @property
     def device_state_attributes(self):
-        attrs = {}
-        return attrs
+        return self._attr
 
     @state.setter
     def state(self, state):
@@ -435,7 +466,9 @@ class SIAAlarmControlPanel(RestoreEntity):
         if self._remove_unavailability_tracker:
             self._remove_unavailability_tracker()
         self._remove_unavailability_tracker = async_track_point_in_utc_time(
-            self.hass, self._async_set_unavailable, utcnow() + TIME_TILL_UNAVAILABLE
+            self.hass,
+            self._async_set_unavailable,
+            utcnow() + self._ping_interval + PING_INTERVAL_MARGIN,
         )
         if not self._is_available:
             self._is_available = True
@@ -450,9 +483,11 @@ class SIAAlarmControlPanel(RestoreEntity):
 
 
 class SIABinarySensor(RestoreEntity):
-    def __init__(self, entity_id, name, device_class, hass):
+    def __init__(self, entity_id, name, device_class, zone, ping_interval, hass):
         self._device_class = device_class
         self._should_poll = False
+        self._ping_interval = ping_interval
+        self._attr = {CONF_PING_INTERVAL: self.ping_interval, CONF_ZONE: zone}
         self.entity_id = generate_entity_id(
             entity_id_format=BINARY_SENSOR_FORMAT, name=entity_id, hass=hass
         )
@@ -475,6 +510,10 @@ class SIABinarySensor(RestoreEntity):
         return self._name
 
     @property
+    def ping_interval(self):
+        return str(self._ping_interval)
+
+    @property
     def state(self):
         return STATE_ON if self.is_on else STATE_OFF
 
@@ -488,8 +527,7 @@ class SIABinarySensor(RestoreEntity):
 
     @property
     def device_state_attributes(self):
-        attrs = {}
-        return attrs
+        return self._attr
 
     @property
     def device_class(self):
@@ -512,7 +550,9 @@ class SIABinarySensor(RestoreEntity):
         if self._remove_unavailability_tracker:
             self._remove_unavailability_tracker()
         self._remove_unavailability_tracker = async_track_point_in_utc_time(
-            self.hass, self._async_set_unavailable, utcnow() + TIME_TILL_UNAVAILABLE
+            self.hass,
+            self._async_set_unavailable,
+            utcnow() + self._ping_interval + PING_INTERVAL_MARGIN,
         )
         if not self._is_available:
             self._is_available = True
@@ -527,14 +567,14 @@ class SIABinarySensor(RestoreEntity):
 
 
 class SIASensor(Entity):
-    def __init__(self, entity_id, name, device_class, hass):
+    def __init__(self, entity_id, name, device_class, zone, ping_interval, hass):
         self._should_poll = False
         self._device_class = device_class
         self.entity_id = generate_entity_id(
             entity_id_format=SENSOR_FORMAT, name=entity_id, hass=hass
         )
         self._state = utcnow()
-        self._attr = {}
+        self._attr = {CONF_PING_INTERVAL: str(ping_interval), CONF_ZONE: zone}
         self._name = name
         self.hass = hass
 
@@ -574,7 +614,7 @@ class AlarmTCPHandler(socketserver.BaseRequestHandler):
     _received_data = "".encode()
 
     def handle_line(self, line):
-        _LOGGER.debug("Income raw string: " + line.decode())
+        # _LOGGER.debug("Income raw string: " + line.decode())
         accountId = line[line.index(b"#") + 1 : line.index(b"[")].decode()
 
         pos = line.find(b'"')
@@ -628,7 +668,7 @@ class AlarmTCPHandler(socketserver.BaseRequestHandler):
         CRC = 0
         for letter in msg:
             temp = letter
-            for j in range(0, 8):  # @UnusedVariable
+            for _ in range(0, 8):
                 temp ^= CRC & 1
                 CRC >>= 1
                 if (temp & 1) != 0:
@@ -642,7 +682,7 @@ class AlarmTCPHandler(socketserver.BaseRequestHandler):
         CRC = 0
         for letter in msg:
             temp = ord(letter)
-            for j in range(0, 8):  # @UnusedVariable
+            for _ in range(0, 8):
                 temp ^= CRC & 1
                 CRC >>= 1
                 if (temp & 1) != 0:
