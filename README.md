@@ -30,7 +30,7 @@ Platform | Description
 6. Select Preferred Network. Ethernet is preferred if hub and HA in same network. Multiple networks are not tested.
 7. Enable Periodic Reports. The interval with which the alarm systems reports to the monitoring station, default is 1 minute. This component adds 30 seconds before setting the alarm unavailable to deal with slights latencies between ajax and HA and the async nature of HA.
 8. Encryption is on your risk. There is no CPU or network hit, so it's preferred. Password is 16 ASCII characters.
-{% if not installed %}
+
 ## Installation
 
 1. Click install.
@@ -47,7 +47,6 @@ sia:
       account: account
 ```
 
-{% endif %}
 ## Full configuration
 
 ```yaml
