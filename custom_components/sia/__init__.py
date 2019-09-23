@@ -191,7 +191,7 @@ class Hub:
         self._hass = hass
         self._states = {}
         self._zones = hub_config.get(CONF_ZONES)
-        self._entity_ids = []
+        self._sensor_ids = []
         self._ping_interval = timedelta(minutes=hub_config.get(CONF_PING_INTERVAL))
         # create the hub sensor
         self._upsert_sensor(HUB_ZONE, DEVICE_CLASS_TIMESTAMP)
@@ -206,7 +206,7 @@ class Hub:
         reaction = self.reactions.get(sia.code)
         if reaction:
             # get the entity_id (or create it)
-            entity_id = self._upsert_sensor(zoneID, reaction["type"])
+            sensor_id = self._upsert_sensor(zoneID, reaction["type"])
             # find out which action to take, update attribute, new state or eval for new state
             attr = reaction.get("attr")
             new_state = reaction.get("new_state")
@@ -215,16 +215,16 @@ class Hub:
             if new_state or new_state_eval:
                 _LOGGER.debug(
                     "Will set state for entity: "
-                    + entity_id
+                    + sensor_id
                     + " to state: "
                     + (new_state if new_state else new_state_eval)
                 )
-                self._states[entity_id].state = (
+                self._states[sensor_id].state = (
                     new_state if new_state else eval(new_state_eval)
                 )
             if attr:
-                _LOGGER.debug("Will set attribute entity: " + entity_id)
-                self._states[entity_id].add_attribute(
+                _LOGGER.debug("Will set attribute entity: " + sensor_id)
+                self._states[sensor_id].add_attribute(
                     {
                         "Last message": utcnow().isoformat()
                         + ": SIA: "
@@ -238,8 +238,8 @@ class Hub:
                 "Unhandled event type: " + str(sia) + ", Message: " + message
             )
         # whenever a message comes in, the connection is good, so reset the availability clock for all devices.
-        for e in self._entity_ids:
-            self._states[e].assume_available()
+        for s in self._states:
+            s.assume_available()
 
     def _parse_message(self, msg):
         """ Parses the message and finds the SIA."""
@@ -261,9 +261,8 @@ class Hub:
 
     def _upsert_sensor(self, zone, sensor_type):
         """ checks if the entity exists, and creates otherwise. always gives back the entity_id """
-        sensor_name = self._get_sensor_name(zone, sensor_type)
-        entity_id = self._get_entity_id(zone, sensor_type)
-        if not (entity_id in self._entity_ids):
+        sensor_id = self._get_id(zone, sensor_type)
+        if not (sensor_id in self._sensor_ids):
             zone_found = False
             for z in self._zones:
                 # if the zone exists then a sensor is missing,
@@ -277,22 +276,24 @@ class Hub:
                 self._zones.append({CONF_ZONE: zone, CONF_SENSORS: [sensor_type]})
 
             # add the new sensor
+            sensor_name = self._get_sensor_name(zone, sensor_type)
             constructor = self.sensor_types_classes.get(sensor_type)
             if constructor:
-                self._states[entity_id] = eval(constructor)(
-                    entity_id,
+                new_sensor = eval(constructor)(
+                    sensor_id,
                     sensor_name,
                     sensor_type,
                     zone,
                     self._ping_interval,
                     self._hass,
                 )
+                self._states[sensor_id] = new_sensor
             else:
                 _LOGGER.warning("Unknown device type: " + sensor_type)
-            self._entity_ids.append(entity_id)
-        return entity_id
+            self._sensor_ids.append(sensor_id)
+        return sensor_id
 
-    def _get_entity_id(self, zone=0, sensor_type=None):
+    def _get_id(self, zone=0, sensor_type=None):
         """ Gives back a entity_id according to the variables, defaults to the hub sensor entity_id. """
         if str(zone) == "0":
             return self._name + HUB_SENSOR_NAME
@@ -324,7 +325,9 @@ class Hub:
                 )
 
     def _get_zone_name(self, zone: int):
-        return next((z.get(CONF_NAME) for z in self._zones if z.get(CONF_ZONE) == zone))
+        return next(
+            (z.get(CONF_NAME) for z in self._zones if z.get(CONF_ZONE) == zone), None
+        )
 
     def process_line(self, line):
         # _LOGGER.debug("Hub.process_line" + line.decode())
@@ -381,7 +384,7 @@ class EncryptedHub(Hub):
 class SIAAlarmControlPanel(RestoreEntity):
     def __init__(self, entity_id, name, device_class, zone, ping_interval, hass):
         self._should_poll = False
-        self.entity_id = generate_entity_id(
+        self._entity_id = generate_entity_id(
             entity_id_format=ALARM_FORMAT, name=entity_id, hass=hass
         )
         self._name = name
@@ -410,6 +413,10 @@ class SIAAlarmControlPanel(RestoreEntity):
         else:
             self._state = STATE_ALARM_DISARMED  # assume disarmed
         self._async_track_unavailable()
+
+    @property
+    def entity_id(self):
+        return self._entity_id
 
     @property
     def name(self):
@@ -488,13 +495,17 @@ class SIABinarySensor(RestoreEntity):
         self._should_poll = False
         self._ping_interval = ping_interval
         self._attr = {CONF_PING_INTERVAL: self.ping_interval, CONF_ZONE: zone}
-        self.entity_id = generate_entity_id(
+        self._entity_id = generate_entity_id(
             entity_id_format=BINARY_SENSOR_FORMAT, name=entity_id, hass=hass
         )
         self._name = name
         self.hass = hass
         self._is_available = True
         self._remove_unavailability_tracker = None
+
+    @property
+    def entity_id(self):
+        return self._entity_id
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
@@ -570,13 +581,17 @@ class SIASensor(Entity):
     def __init__(self, entity_id, name, device_class, zone, ping_interval, hass):
         self._should_poll = False
         self._device_class = device_class
-        self.entity_id = generate_entity_id(
+        self._entity_id = generate_entity_id(
             entity_id_format=SENSOR_FORMAT, name=entity_id, hass=hass
         )
         self._state = utcnow()
         self._attr = {CONF_PING_INTERVAL: str(ping_interval), CONF_ZONE: zone}
         self._name = name
         self.hass = hass
+
+    @property
+    def entity_id(self):
+        return self._entity_id
 
     @property
     def name(self):
