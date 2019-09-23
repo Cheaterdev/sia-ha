@@ -238,8 +238,8 @@ class Hub:
                 "Unhandled event type: " + str(sia) + ", Message: " + message
             )
         # whenever a message comes in, the connection is good, so reset the availability clock for all devices.
-        for s in self._states:
-            s.assume_available()
+        for s in self._sensor_ids:
+            self._states[s].assume_available()
 
     def _parse_message(self, msg):
         """ Parses the message and finds the SIA."""
