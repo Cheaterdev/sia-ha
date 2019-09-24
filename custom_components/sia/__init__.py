@@ -243,9 +243,12 @@ class Hub:
 
     def _parse_message(self, msg):
         """ Parses the message and finds the SIA."""
-        parts = msg.split("|")[2].split("]")[0].split("/")
+        _LOGGER.debug("Message to parse: " + msg)
+        # example1: |#XXXXX|Nri1/NL501]_10:47:31,09-24-2019
+        # example2: |Nri1/OP501]_10:47:32,09-24-2019
+        parts = msg.rpartition("|")[2].partition("]")[0].partition("/")
         zoneID = parts[0][3:]
-        message = parts[1]
+        message = parts[2]
         sia = SIACodes(message[0:2])
         _LOGGER.debug(
             "Incoming parsed: "
@@ -315,8 +318,7 @@ class Hub:
             if sensor_type:
                 return (
                     self._name
-                    + (" " + zone_name if zone_name else "")
-                    + " "
+                    + (" " + zone_name + " " if zone_name else " ")
                     + sensor_type
                 )
             else:
@@ -330,55 +332,73 @@ class Hub:
         )
 
     def process_line(self, line):
-        # _LOGGER.debug("Hub.process_line" + line.decode())
+        _LOGGER.debug("Hub.process_line" + line.decode())
         pos = line.find(ID_STRING)
-        assert pos >= 0, "Can't find ID_STRING, check encryption configs"
-        seq = line[pos + len(ID_STRING) : pos + len(ID_STRING) + 4]
-        data = line[line.index(b"[") :]
-        # _LOGGER.debug("Hub.process_line found data: " + data.decode())
-        self._update_states(*self._parse_message(data.decode()))
-        return '"ACK"' + (seq.decode()) + "L0#" + (self._accountId) + "[]"
+        if pos >= 0:
+            seq = line[pos + len(ID_STRING) : pos + len(ID_STRING) + 4]
+            data = line[line.index(b"[") :]
+            _LOGGER.debug("Hub.process_line found data: " + data.decode())
+            self._update_states(*self._parse_message(data.decode()))
+            return '"ACK"' + (seq.decode()) + "L0#" + (self._accountId) + "[]"
+        else:
+            raise KeyError(
+                "Can't find ID_STRING, is SIA encryption enabled? Line: " + line
+            )
 
 
 class EncryptedHub(Hub):
     def __init__(self, hass, hub_config):
         self._key = hub_config[CONF_ENCRYPTION_KEY].encode("utf8")
-        iv = Random.new().read(AES.block_size)
-        _cipher = AES.new(self._key, AES.MODE_CBC, iv)
-        self.iv2 = None
+        # IV standards from https://manualzz.com/doc/11555754/sia-digital-communication-standard-%E2%80%93-internet-protocol-ev...
+        # page 12 specifies the decrytion IV to all zeros.
+        self._decrypter = AES.new(
+            self._key, AES.MODE_CBC, unhexlify("00000000000000000000000000000000")
+        )
+        # self.iv2 = None
+        # encode_iv = Random.new().read(AES.block_size)
+        _encrypter = AES.new(self._key, AES.MODE_CBC, Random.new().read(AES.block_size))
         self._ending = (
-            hexlify(_cipher.encrypt("00000000000000|]".encode("utf8")))
+            hexlify(_encrypter.encrypt("00000000000000|]".encode("utf8")))
             .decode(encoding="UTF-8")
             .upper()
         )
         Hub.__init__(self, hass, hub_config)
 
     def _manage_string(self, msg):
-        iv = unhexlify(
-            "00000000000000000000000000000000"
-        )  # where i need to find proper IV ? Only this works good.
-        _cipher = AES.new(self._key, AES.MODE_CBC, iv)
-        data = _cipher.decrypt(unhexlify(msg[1:]))
-        # _LOGGER.debug(
-        #     "EncryptedHub.manage_string data: "
-        #     + data.decode(encoding="UTF-8", errors="replace")
-        # )
-
+        _LOGGER.debug("EncryptedHub.manage_string decrypting: " + str(msg))
+        data = self._decrypter.decrypt(unhexlify(msg))
+        _LOGGER.debug("EncryptedHub.manage_string decrypted to: " + str(data))
         data = data[data.index(b"|") :]
         resmsg = data.decode(encoding="UTF-8", errors="replace")
+        _LOGGER.debug("EncryptedHub.manage_string decoded to: " + resmsg)
         Hub._update_states(self, *Hub._parse_message(self, resmsg))
 
-    def process_line(self, line):
-        # _LOGGER.debug("EncryptedHub.process_line" + line.decode())
-        pos = line.find(ID_STRING_ENCODED)
-        assert pos >= 0, "Can't find ID_STRING_ENCODED, is SIA encryption enabled?"
-        seq = line[pos + len(ID_STRING_ENCODED) : pos + len(ID_STRING_ENCODED) + 4]
-        data = line[line.index(b"[") :]
-        # _LOGGER.debug("EncryptedHub.process_line found data: " + data.decode())
-        self._manage_string(data.decode())
-        return (
-            '"*ACK"' + (seq.decode()) + "L0#" + (self._accountId) + "[" + self._ending
+    def process_line(self, line: string):
+        _LOGGER.debug(
+            "EncryptedHub.process_line: "
+            + line.decode()
+            + ", finding string: "
+            + str(ID_STRING_ENCODED)
         )
+        pos = line.find(ID_STRING_ENCODED)
+        # assert pos >= 0, "Can't find ID_STRING_ENCODED, is SIA encryption enabled?"
+        if pos >= 0:
+            seq = line[pos + len(ID_STRING_ENCODED) : pos + len(ID_STRING_ENCODED) + 4]
+            data = line[line.index(b"[") + 1 :]
+            _LOGGER.debug("EncryptedHub.process_line found data: " + data.decode())
+            self._manage_string(data.decode())
+            return (
+                '"*ACK"'
+                + (seq.decode())
+                + "L0#"
+                + (self._accountId)
+                + "["
+                + self._ending
+            )
+        else:
+            raise KeyError(
+                "Can't find ID_STRING_ENCODED, is SIA encryption enabled? Line: " + line
+            )
 
 
 class SIAAlarmControlPanel(RestoreEntity):
@@ -629,7 +649,7 @@ class AlarmTCPHandler(socketserver.BaseRequestHandler):
     _received_data = "".encode()
 
     def handle_line(self, line):
-        # _LOGGER.debug("Income raw string: " + line.decode())
+        _LOGGER.debug("Income raw string: " + line.decode())
         accountId = line[line.index(b"#") + 1 : line.index(b"[")].decode()
 
         pos = line.find(b'"')
@@ -643,6 +663,14 @@ class AlarmTCPHandler(socketserver.BaseRequestHandler):
             if accountId not in hass_platform.data[DOMAIN]:
                 raise Exception("Not supported account " + accountId)
             response = hass_platform.data[DOMAIN][accountId].process_line(line)
+        except KeyError:
+            _LOGGER.error(
+                "Can't find ID_STRING_ENCODED, is SIA encryption enabled? Line: " + line
+            )
+            timestamp = datetime.fromtimestamp(time.time()).strftime(
+                "_%H:%M:%S,%m-%d-%Y"
+            )
+            response = '"NAK"0000L0R0A0[]' + timestamp
         except Exception as e:
             _LOGGER.error(str(e))
             timestamp = datetime.fromtimestamp(time.time()).strftime(
