@@ -1,3 +1,5 @@
+"""Module for SIA Hub."""
+
 import asyncio
 import base64
 from binascii import hexlify, unhexlify
@@ -59,7 +61,10 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util.dt import utcnow
 
-from .sia_codes import SIACodes
+from .sia_event import SIAEvent
+from .alarm_control_panel import SIAAlarmControlPanel
+from .binary_sensor import SIABinarySensor
+from .sensor import SIASensor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -113,42 +118,39 @@ CONFIG_SCHEMA = vol.Schema(
     extra=vol.ALLOW_EXTRA,
 )
 
-ID_STRING = '"SIA-DCS"'.encode()
-ID_STRING_ENCODED = '"*SIA-DCS"'.encode()
 ID_R = "\r".encode()
 
 PING_INTERVAL_MARGIN = timedelta(seconds=30)
 
-hass_platform = None
+HASS_PLATFORM = None
 
 
 def setup(hass, config):
-    global hass_platform
+    """Implementation of setup from HA."""
+    global HASS_PLATFORM
     socketserver.TCPServer.allow_reuse_address = True
-    hass_platform = hass
+    HASS_PLATFORM = hass
 
-    hass_platform.data[DOMAIN] = {}
+    HASS_PLATFORM.data[DOMAIN] = {}
 
     port = int(config[DOMAIN][CONF_PORT])
 
     for hub_config in config[DOMAIN][CONF_HUBS]:
-        if CONF_ENCRYPTION_KEY in hub_config:
-            hass.data[DOMAIN][hub_config[CONF_ACCOUNT]] = EncryptedHub(hass, hub_config)
-        else:
-            hass.data[DOMAIN][hub_config[CONF_ACCOUNT]] = Hub(hass, hub_config)
+        hass.data[DOMAIN][hub_config[CONF_ACCOUNT]] = Hub(hass, hub_config)
 
     for component in ["binary_sensor", "alarm_control_panel", "sensor"]:
         discovery.load_platform(hass, component, DOMAIN, {}, config)
 
     server = socketserver.TCPServer(("", port), AlarmTCPHandler)
 
-    t = threading.Thread(target=server.serve_forever)
-    t.start()
+    server_thread = threading.Thread(target=server.serve_forever)
+    server_thread.start()
 
     return True
 
 
 class Hub:
+    """Class for SIA Hubs."""
 
     sensor_types_classes = {
         DEVICE_CLASS_ALARM: "SIAAlarmControlPanel",
@@ -187,91 +189,48 @@ class Hub:
 
     def __init__(self, hass, hub_config):
         self._name = hub_config[CONF_NAME]
-        self._accountId = hub_config[CONF_ACCOUNT]
+        self._account_id = hub_config[CONF_ACCOUNT]
         self._hass = hass
         self._states = {}
         self._zones = hub_config.get(CONF_ZONES)
         self._sensor_ids = []
         self._ping_interval = timedelta(minutes=hub_config.get(CONF_PING_INTERVAL))
+        self._encrypted = False
+        self._ending = "]"
+        self._key = hub_config.get(CONF_ENCRYPTION_KEY, None)
+        if self._key:
+            self._encrypted = True
+            self._key = self._key.encode("utf8")
+            # IV standards from https://manualzz.com/doc/11555754/sia-digital-communication-standard-%E2%80%93-internet-protocol-ev...
+            # page 12 specifies the decrytion IV to all zeros.
+            self._decrypter = AES.new(
+                self._key, AES.MODE_CBC, unhexlify("00000000000000000000000000000000")
+            )
+            _encrypter = AES.new(
+                self._key, AES.MODE_CBC, Random.new().read(AES.block_size)
+            )
+            self._ending = (
+                hexlify(_encrypter.encrypt("00000000000000|]".encode("utf8")))
+                .decode(encoding="UTF-8")
+                .upper()
+            )
         # create the hub sensor
         self._upsert_sensor(HUB_ZONE, DEVICE_CLASS_TIMESTAMP)
         # add sensors for each zone as specified in the config.
-        for z in self._zones:
-            for s in z.get(CONF_SENSORS):
-                self._upsert_sensor(z.get(CONF_ZONE), s)
-
-    def _update_states(self, sia, zoneID, message):
-        """ Updates the sensors."""
-        # find the reactions for that code (if any)
-        reaction = self.reactions.get(sia.code)
-        if reaction:
-            # get the entity_id (or create it)
-            sensor_id = self._upsert_sensor(zoneID, reaction["type"])
-            # find out which action to take, update attribute, new state or eval for new state
-            attr = reaction.get("attr")
-            new_state = reaction.get("new_state")
-            new_state_eval = reaction.get("new_state_eval")
-            # do the work (can be more than 1)
-            if new_state or new_state_eval:
-                _LOGGER.debug(
-                    "Will set state for entity: "
-                    + sensor_id
-                    + " to state: "
-                    + (new_state if new_state else new_state_eval)
-                )
-                self._states[sensor_id].state = (
-                    new_state if new_state else eval(new_state_eval)
-                )
-            if attr:
-                _LOGGER.debug("Will set attribute entity: " + sensor_id)
-                self._states[sensor_id].add_attribute(
-                    {
-                        "Last message": utcnow().isoformat()
-                        + ": SIA: "
-                        + str(sia)
-                        + ", Message: "
-                        + message
-                    }
-                )
-        else:
-            _LOGGER.warning(
-                "Unhandled event type: " + str(sia) + ", Message: " + message
-            )
-        # whenever a message comes in, the connection is good, so reset the availability clock for all devices.
-        for s in self._sensor_ids:
-            self._states[s].assume_available()
-
-    def _parse_message(self, msg):
-        """ Parses the message and finds the SIA."""
-        _LOGGER.debug("Message to parse: " + msg)
-        # example1: |#XXXXX|Nri1/NL501]_10:47:31,09-24-2019
-        # example2: |Nri1/OP501]_10:47:32,09-24-2019
-        parts = msg.rpartition("|")[2].partition("]")[0].partition("/")
-        zoneID = parts[0][3:]
-        message = parts[2]
-        sia = SIACodes(message[0:2])
-        _LOGGER.debug(
-            "Incoming parsed: "
-            + msg
-            + " to sia: "
-            + str(sia)
-            + " for zone: "
-            + zoneID
-            + " with message: "
-            + message
-        )
-        return sia, zoneID, message
+        for zone in self._zones:
+            for sensor in zone.get(CONF_SENSORS):
+                self._upsert_sensor(zone.get(CONF_ZONE), sensor)
 
     def _upsert_sensor(self, zone, sensor_type):
         """ checks if the entity exists, and creates otherwise. always gives back the entity_id """
         sensor_id = self._get_id(zone, sensor_type)
         if not (sensor_id in self._sensor_ids):
             zone_found = False
-            for z in self._zones:
+            for existing_zone in self._zones:
                 # if the zone exists then a sensor is missing,
                 # so, get the zone and add the missing sensor
-                if z[CONF_ZONE] == zone:
-                    z[CONF_SENSORS].append(sensor_type)
+                if existing_zone[CONF_ZONE] == zone:
+                    existing_zone[CONF_SENSORS].append(sensor_type)
                     zone_found = True
                     break
             if not zone_found:
@@ -281,7 +240,7 @@ class Hub:
             # add the new sensor
             sensor_name = self._get_sensor_name(zone, sensor_type)
             constructor = self.sensor_types_classes.get(sensor_type)
-            if constructor:
+            if constructor and sensor_name:
                 new_sensor = eval(constructor)(
                     sensor_id,
                     sensor_name,
@@ -292,7 +251,9 @@ class Hub:
                 )
                 self._states[sensor_id] = new_sensor
             else:
-                _LOGGER.warning("Unknown device type: " + sensor_type)
+                _LOGGER.warning(
+                    "Hub: Upsert Sensor: Unknown device type: %s", sensor_type
+                )
             self._sensor_ids.append(sensor_id)
         return sensor_id
 
@@ -305,7 +266,7 @@ class Hub:
                 return self._name + "_" + str(zone) + "_" + sensor_type
             else:
                 _LOGGER.error(
-                    "Not allowed to create an entity_id without type, unless zone == 0."
+                    "Hub: Get ID: Not allowed to create an entity_id without type, unless zone == 0."
                 )
 
     def _get_sensor_name(self, zone=0, sensor_type=None):
@@ -323,374 +284,134 @@ class Hub:
                 )
             else:
                 _LOGGER.error(
-                    "Not allowed to create an entity_id without type, unless zone == 0."
+                    "Hub: Get Sensor Name: Not allowed to create an entity_id without type, unless zone == 0."
                 )
+                return None
 
     def _get_zone_name(self, zone: int):
         return next(
             (z.get(CONF_NAME) for z in self._zones if z.get(CONF_ZONE) == zone), None
         )
 
-    def process_line(self, line):
-        _LOGGER.debug("Hub.process_line" + line.decode())
-        pos = line.find(ID_STRING)
-        if pos >= 0:
-            seq = line[pos + len(ID_STRING) : pos + len(ID_STRING) + 4]
-            data = line[line.index(b"[") :]
-            _LOGGER.debug("Hub.process_line found data: " + data.decode())
-            self._update_states(*self._parse_message(data.decode()))
-            return '"ACK"' + (seq.decode()) + "L0#" + (self._accountId) + "[]"
+    def _update_states(self, event):
+        """ Updates the sensors."""
+        # find the reactions for that code (if any)
+        reaction = self.reactions.get(event.code)
+        if reaction:
+            # get the entity_id (or create it)
+            sensor_id = self._upsert_sensor(event.zone, reaction["type"])
+            # find out which action to take, update attribute, new state or eval for new state
+            attr = reaction.get("attr")
+            new_state = reaction.get("new_state")
+            new_state_eval = reaction.get("new_state_eval")
+            # do the work (can be more than 1)
+            if new_state or new_state_eval:
+                _LOGGER.debug(
+                    "Hub: Update States: Will set state for entity: "
+                    + sensor_id
+                    + " to state: "
+                    + (new_state if new_state else new_state_eval)
+                )
+                self._states[sensor_id].state = (
+                    new_state if new_state else eval(new_state_eval)
+                )
+            if attr:
+                _LOGGER.debug(
+                    "Hub: Update States: Will set attribute entity: %s", sensor_id
+                )
+                self._states[sensor_id].add_attribute(
+                    {
+                        "Last message": utcnow().isoformat()
+                        + ": SIA: "
+                        + event.sia_string
+                        + ", Message: "
+                        + event.message
+                    }
+                )
         else:
-            raise KeyError(
-                "Can't find ID_STRING, is SIA encryption enabled? Line: " + line
+            _LOGGER.warning(
+                "Hub: Update States: Unhandled event type: "
+                + event.sia_string
+                + ", Message: "
+                + event.message
             )
+        # whenever a message comes in, the connection is good, so reset the availability clock for all devices.
+        for sensor in self._sensor_ids:
+            self._states[sensor].assume_available()
 
+    def process_event(self, event):
+        """Process the Event that comes from the TCP handler."""
+        try:
+            _LOGGER.debug("Hub: Process event: %s", event)
+            if self._encrypted:
+                self._decrypt_string(event)
+                _LOGGER.debug("Hub: Process event, after decrypt: %s", event)
+            self._update_states(event)
+        except Exception as exc:
+            _LOGGER.error("Hub: Process Event: %s gave error %s", event, str(exc))
 
-class EncryptedHub(Hub):
-    def __init__(self, hass, hub_config):
-        self._key = hub_config[CONF_ENCRYPTION_KEY].encode("utf8")
-        # IV standards from https://manualzz.com/doc/11555754/sia-digital-communication-standard-%E2%80%93-internet-protocol-ev...
-        # page 12 specifies the decrytion IV to all zeros.
-        self._decrypter = AES.new(
-            self._key, AES.MODE_CBC, unhexlify("00000000000000000000000000000000")
+        # Even if decrypting or something else gives an error, create the acknowledgement message.
+        return '"ACK"{}L0#{}[{}'.format(
+            event.sequence.decode(), self._account_id, self._ending
         )
-        # self.iv2 = None
-        # encode_iv = Random.new().read(AES.block_size)
-        _encrypter = AES.new(self._key, AES.MODE_CBC, Random.new().read(AES.block_size))
-        self._ending = (
-            hexlify(_encrypter.encrypt("00000000000000|]".encode("utf8")))
-            .decode(encoding="UTF-8")
-            .upper()
+
+    def _decrypt_string(self, event):
+        """Decrypt the encrypted event content and parse it."""
+        _LOGGER.debug("Hub: Decrypt String: Original: %s", str(event.content))
+        resmsg = self._decrypter.decrypt(unhexlify(event.content)).decode(
+            encoding="UTF-8", errors="replace"
         )
-        Hub.__init__(self, hass, hub_config)
-
-    def _manage_string(self, msg):
-        _LOGGER.debug("EncryptedHub.manage_string decrypting: " + str(msg))
-        data = self._decrypter.decrypt(unhexlify(msg))
-        _LOGGER.debug("EncryptedHub.manage_string decrypted to: " + str(data))
-        data = data[data.index(b"|") :]
-        resmsg = data.decode(encoding="UTF-8", errors="replace")
-        _LOGGER.debug("EncryptedHub.manage_string decoded to: " + resmsg)
-        Hub._update_states(self, *Hub._parse_message(self, resmsg))
-
-    def process_line(self, line: string):
-        _LOGGER.debug(
-            "EncryptedHub.process_line: "
-            + line.decode()
-            + ", finding string: "
-            + str(ID_STRING_ENCODED)
-        )
-        pos = line.find(ID_STRING_ENCODED)
-        # assert pos >= 0, "Can't find ID_STRING_ENCODED, is SIA encryption enabled?"
-        if pos >= 0:
-            seq = line[pos + len(ID_STRING_ENCODED) : pos + len(ID_STRING_ENCODED) + 4]
-            data = line[line.index(b"[") + 1 :]
-            _LOGGER.debug("EncryptedHub.process_line found data: " + data.decode())
-            self._manage_string(data.decode())
-            return (
-                '"*ACK"'
-                + (seq.decode())
-                + "L0#"
-                + (self._accountId)
-                + "["
-                + self._ending
-            )
-        else:
-            raise KeyError(
-                "Can't find ID_STRING_ENCODED, is SIA encryption enabled? Line: " + line
-            )
-
-
-class SIAAlarmControlPanel(RestoreEntity):
-    def __init__(self, entity_id, name, device_class, zone, ping_interval, hass):
-        self._should_poll = False
-        self._entity_id = generate_entity_id(
-            entity_id_format=ALARM_FORMAT, name=entity_id, hass=hass
-        )
-        self._name = name
-        self.hass = hass
-        self._ping_interval = ping_interval
-        self._attr = {CONF_PING_INTERVAL: self.ping_interval, CONF_ZONE: zone}
-        self._is_available = True
-        self._remove_unavailability_tracker = None
-
-    async def async_added_to_hass(self):
-        await super().async_added_to_hass()
-        state = await self.async_get_last_state()
-        if state is not None and state.state is not None:
-            if state.state == STATE_ALARM_ARMED_AWAY:
-                self._state = STATE_ALARM_ARMED_AWAY
-            elif state.state == STATE_ALARM_ARMED_NIGHT:
-                self._state = STATE_ALARM_ARMED_NIGHT
-            elif state.state == STATE_ALARM_TRIGGERED:
-                self._state = STATE_ALARM_TRIGGERED
-            elif state.state == STATE_ALARM_DISARMED:
-                self._state = STATE_ALARM_DISARMED
-            elif state.state == STATE_ALARM_ARMED_CUSTOM_BYPASS:
-                self._state = STATE_ALARM_ARMED_CUSTOM_BYPASS
-            else:
-                self._state = None
-        else:
-            self._state = STATE_ALARM_DISARMED  # assume disarmed
-        self._async_track_unavailable()
-
-    @property
-    def entity_id(self):
-        return self._entity_id
-
-    @property
-    def name(self):
-        return self._name
-
-    @property
-    def ping_interval(self):
-        return str(self._ping_interval)
-
-    @property
-    def state(self):
-        return self._state
-
-    @property
-    def unique_id(self) -> str:
-        return self._name
-
-    @property
-    def available(self):
-        return self._is_available
-
-    def alarm_disarm(self, code=None):
-        _LOGGER.debug("Not implemented.")
-
-    def alarm_arm_home(self, code=None):
-        _LOGGER.debug("Not implemented.")
-
-    def alarm_arm_away(self, code=None):
-        _LOGGER.debug("Not implemented.")
-
-    def alarm_arm_night(self, code=None):
-        _LOGGER.debug("Not implemented.")
-
-    def alarm_trigger(self, code=None):
-        _LOGGER.debug("Not implemented.")
-
-    def alarm_arm_custom_bypass(self, code=None):
-        _LOGGER.debug("Not implemented.")
-
-    @property
-    def device_state_attributes(self):
-        return self._attr
-
-    @state.setter
-    def state(self, state):
-        self._state = state
-        self.async_schedule_update_ha_state()
-
-    def assume_available(self):
-        self._async_track_unavailable()
-
-    @callback
-    def _async_track_unavailable(self):
-        if self._remove_unavailability_tracker:
-            self._remove_unavailability_tracker()
-        self._remove_unavailability_tracker = async_track_point_in_utc_time(
-            self.hass,
-            self._async_set_unavailable,
-            utcnow() + self._ping_interval + PING_INTERVAL_MARGIN,
-        )
-        if not self._is_available:
-            self._is_available = True
-            return True
-        return False
-
-    @callback
-    def _async_set_unavailable(self, now):
-        self._remove_unavailability_tracker = None
-        self._is_available = False
-        self.async_schedule_update_ha_state()
-
-
-class SIABinarySensor(RestoreEntity):
-    def __init__(self, entity_id, name, device_class, zone, ping_interval, hass):
-        self._device_class = device_class
-        self._should_poll = False
-        self._ping_interval = ping_interval
-        self._attr = {CONF_PING_INTERVAL: self.ping_interval, CONF_ZONE: zone}
-        self._entity_id = generate_entity_id(
-            entity_id_format=BINARY_SENSOR_FORMAT, name=entity_id, hass=hass
-        )
-        self._name = name
-        self.hass = hass
-        self._is_available = True
-        self._remove_unavailability_tracker = None
-
-    @property
-    def entity_id(self):
-        return self._entity_id
-
-    async def async_added_to_hass(self):
-        await super().async_added_to_hass()
-        state = await self.async_get_last_state()
-        if state is not None and state.state is not None:
-            self._state = state.state == STATE_ON
-        else:
-            self._state = None
-        self._async_track_unavailable()
-
-    @property
-    def name(self):
-        return self._name
-
-    @property
-    def ping_interval(self):
-        return str(self._ping_interval)
-
-    @property
-    def state(self):
-        return STATE_ON if self.is_on else STATE_OFF
-
-    @property
-    def unique_id(self) -> str:
-        return self._name
-
-    @property
-    def available(self):
-        return self._is_available
-
-    @property
-    def device_state_attributes(self):
-        return self._attr
-
-    @property
-    def device_class(self):
-        return self._device_class
-
-    @property
-    def is_on(self):
-        return self._state
-
-    @state.setter
-    def state(self, state):
-        self._state = state
-        self.async_schedule_update_ha_state()
-
-    def assume_available(self):
-        self._async_track_unavailable()
-
-    @callback
-    def _async_track_unavailable(self):
-        if self._remove_unavailability_tracker:
-            self._remove_unavailability_tracker()
-        self._remove_unavailability_tracker = async_track_point_in_utc_time(
-            self.hass,
-            self._async_set_unavailable,
-            utcnow() + self._ping_interval + PING_INTERVAL_MARGIN,
-        )
-        if not self._is_available:
-            self._is_available = True
-            return True
-        return False
-
-    @callback
-    def _async_set_unavailable(self, now):
-        self._remove_unavailability_tracker = None
-        self._is_available = False
-        self.async_schedule_update_ha_state()
-
-
-class SIASensor(Entity):
-    def __init__(self, entity_id, name, device_class, zone, ping_interval, hass):
-        self._should_poll = False
-        self._device_class = device_class
-        self._entity_id = generate_entity_id(
-            entity_id_format=SENSOR_FORMAT, name=entity_id, hass=hass
-        )
-        self._state = utcnow()
-        self._attr = {CONF_PING_INTERVAL: str(ping_interval), CONF_ZONE: zone}
-        self._name = name
-        self.hass = hass
-
-    @property
-    def entity_id(self):
-        return self._entity_id
-
-    @property
-    def name(self):
-        return self._name
-
-    @property
-    def state(self):
-        return self._state.isoformat()
-
-    @property
-    def device_state_attributes(self):
-        return self._attr
-
-    def add_attribute(self, attr):
-        self._attr.update(attr)
-
-    @property
-    def device_class(self):
-        return self._device_class
-
-    @state.setter
-    def state(self, state):
-        self._state = state
-
-    def assume_available(self):
-        pass
-
-    @property
-    def icon(self):
-        """Return the icon to use in the frontend, if any."""
-        return "mdi:alarm-light-outline"
+        _LOGGER.debug("Hub: Decrypt String: Decrypted: %s", resmsg)
+        event.parse_decrypted(resmsg)
 
 
 class AlarmTCPHandler(socketserver.BaseRequestHandler):
+    """Class for the TCP Handler."""
+
     _received_data = "".encode()
 
     def handle_line(self, line):
-        _LOGGER.debug("Income raw string: " + line.decode())
-        accountId = line[line.index(b"#") + 1 : line.index(b"[")].decode()
-
-        pos = line.find(b'"')
-        assert pos >= 0, "Can't find message beginning"
-        inputMessage = line[pos:]
-        msgcrc = line[0:4]
-        codecrc = str.encode(AlarmTCPHandler.CRCCalc(inputMessage))
+        """Method called for each line that comes in."""
+        _LOGGER.debug("Income raw string: %s", line)
         try:
-            if msgcrc != codecrc:
+            event = SIAEvent(line)
+            _LOGGER.debug("TCP: Handle Line: event: %s", event)
+            if not event.valid_message:
+                _LOGGER.error(
+                    "TCP: Handle Line: CRC mismatch, received: %s, calculated: %s",
+                    event.msg_crc,
+                    event.calc_crc,
+                )
                 raise Exception("CRC mismatch")
-            if accountId not in hass_platform.data[DOMAIN]:
-                raise Exception("Not supported account " + accountId)
-            response = hass_platform.data[DOMAIN][accountId].process_line(line)
-        except KeyError:
-            _LOGGER.error(
-                "Can't find ID_STRING_ENCODED, is SIA encryption enabled? Line: " + line
-            )
-            timestamp = datetime.fromtimestamp(time.time()).strftime(
-                "_%H:%M:%S,%m-%d-%Y"
-            )
-            response = '"NAK"0000L0R0A0[]' + timestamp
-        except Exception as e:
-            _LOGGER.error(str(e))
+            if event.account not in HASS_PLATFORM.data[DOMAIN]:
+                _LOGGER.error(
+                    "TCP: Handle Line: Not supported account %s", event.account
+                )
+                raise Exception(
+                    "TCP: Handle Line: Not supported account {}".format(event.account)
+                )
+            response = HASS_PLATFORM.data[DOMAIN][event.account].process_event(event)
+        except Exception as exc:
+            _LOGGER.error("TCP: Handle Line: %s", str(exc))
             timestamp = datetime.fromtimestamp(time.time()).strftime(
                 "_%H:%M:%S,%m-%d-%Y"
             )
             response = '"NAK"0000L0R0A0[]' + timestamp
 
         header = ("%04x" % len(response)).upper()
-        CRC = AlarmTCPHandler.CRCCalc2(response)
-        response = "\n" + CRC + header + response + "\r"
-
+        response = "\n{}{}{}\r".format(
+            AlarmTCPHandler.crc_calc(response), header, response
+        )
         byte_response = str.encode(response)
         self.request.sendall(byte_response)
 
     def handle(self):
+        """Method called for handling."""
         line = b""
         try:
             while True:
                 raw = self.request.recv(1024)
-                if (not raw) or (len(raw) == 0):
+                if not raw:
                     return
                 raw = bytearray(raw)
                 while True:
@@ -701,35 +422,24 @@ class AlarmTCPHandler(socketserver.BaseRequestHandler):
                     else:
                         break
 
-                    self.handle_line(line)
-        except Exception as e:
-            _LOGGER.error(str(e) + " last line: " + line.decode())
+                    self.handle_line(line.decode())
+        except Exception as exc:
+            _LOGGER.error(
+                "TCP: Handle: last line %s gave error: %s", line.decode(), str(exc)
+            )
             return
 
     @staticmethod
-    def CRCCalc(msg):
-        CRC = 0
-        for letter in msg:
-            temp = letter
-            for _ in range(0, 8):
-                temp ^= CRC & 1
-                CRC >>= 1
-                if (temp & 1) != 0:
-                    CRC ^= 0xA001
-                temp >>= 1
-
-        return ("%x" % CRC).upper().zfill(4)
-
-    @staticmethod
-    def CRCCalc2(msg):
-        CRC = 0
+    def crc_calc(msg):
+        """Calculate the CRC of the response."""
+        new_crc = 0
         for letter in msg:
             temp = ord(letter)
             for _ in range(0, 8):
-                temp ^= CRC & 1
-                CRC >>= 1
+                temp ^= new_crc & 1
+                new_crc >>= 1
                 if (temp & 1) != 0:
-                    CRC ^= 0xA001
+                    new_crc ^= 0xA001
                 temp >>= 1
 
-        return ("%x" % CRC).upper().zfill(4)
+        return ("%x" % new_crc).upper().zfill(4)
