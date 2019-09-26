@@ -2,6 +2,7 @@
 
 import re
 
+from . import _LOGGER
 
 class SIAEvent:
     """Class for SIA Events."""
@@ -20,9 +21,13 @@ class SIAEvent:
         # check if there is at lease one match
         if not matches:
             raise ValueError("SIAEvent: Constructor: no matches found.")
-        self.msg_crc, self.full_message, self.message_type, self.sequence, self.receiver, self.prefix, self.account, self.content, self.zone, self.code, self.message, self.timestamp = matches[
+        # _LOGGER.debug(matches)
+        self.msg_crc, self.full_message, self.message_type, self.sequence, self.receiver, self.prefix, self.account, self.encrypted_content, self.content, self.zone, self.code, self.message, self.timestamp = matches[
             0
         ]
+        self.type = ""
+        self.description = ""
+        self.concerns = ""
         self.calc_crc = SIAEvent.crc_calc(self.full_message)
         if self.code:
             self._add_sia()
@@ -51,7 +56,7 @@ class SIAEvent:
     def crc_calc(msg):
         """Calculate the CRC of the events."""
         crc = 0
-        for letter in msg:
+        for letter in str.encode(msg):
             temp = letter
             for _ in range(0, 8):
                 temp ^= crc & 1
@@ -59,7 +64,7 @@ class SIAEvent:
                 if (temp & 1) != 0:
                     crc ^= 0xA001
                 temp >>= 1
-        return str.encode(("%x" % crc).upper().zfill(4))
+        return ("%x" % crc).upper().zfill(4)
 
     @property
     def valid_message(self):
@@ -74,7 +79,7 @@ class SIAEvent:
         )
 
     def __str__(self):
-        return "CRC: {}, Calc CRC: {}, Full Message: {}, Message type: {}, Sequence: {}, Receiver: {}, Prefix: {}, Account: {}, Content: {}, Zone: {}, Code: {}, Message: {}, Timestamp: {}, Code: {}, Type: {}, Description: {}, Concerns: {}".format(
+        return "CRC: {}, Calc CRC: {}, Full Message: {}, Message type: {}, Sequence: {}, Receiver: {}, Prefix: {}, Account: {}, Encrypted Content: {}, Content: {}, Zone: {}, Code: {}, Message: {}, Timestamp: {}, Code: {}, Type: {}, Description: {}, Concerns: {}".format(
             self.msg_crc,
             self.calc_crc,
             self.full_message,
@@ -83,6 +88,7 @@ class SIAEvent:
             self.receiver,
             self.prefix,
             self.account,
+            self.encrypted_content, 
             self.content,
             self.zone,
             self.code,

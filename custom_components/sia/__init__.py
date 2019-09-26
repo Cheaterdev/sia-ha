@@ -61,11 +61,6 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util.dt import utcnow
 
-from .sia_event import SIAEvent
-from .alarm_control_panel import SIAAlarmControlPanel
-from .binary_sensor import SIABinarySensor
-from .sensor import SIASensor
-
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "sia"
@@ -123,6 +118,12 @@ ID_R = "\r".encode()
 PING_INTERVAL_MARGIN = timedelta(seconds=30)
 
 HASS_PLATFORM = None
+
+#final import here, because they rely on variables above
+from .sia_event import SIAEvent
+from .alarm_control_panel import SIAAlarmControlPanel
+from .binary_sensor import SIABinarySensor
+from .sensor import SIASensor
 
 
 def setup(hass, config):
@@ -197,8 +198,9 @@ class Hub:
         self._ping_interval = timedelta(minutes=hub_config.get(CONF_PING_INTERVAL))
         self._encrypted = False
         self._ending = "]"
-        self._key = hub_config.get(CONF_ENCRYPTION_KEY, None)
+        self._key = hub_config.get(CONF_ENCRYPTION_KEY)
         if self._key:
+            _LOGGER.debug("Hub: init: encryption is enabled.")
             self._encrypted = True
             self._key = self._key.encode("utf8")
             # IV standards from https://manualzz.com/doc/11555754/sia-digital-communication-standard-%E2%80%93-internet-protocol-ev...
@@ -352,13 +354,13 @@ class Hub:
 
         # Even if decrypting or something else gives an error, create the acknowledgement message.
         return '"ACK"{}L0#{}[{}'.format(
-            event.sequence.decode(), self._account_id, self._ending
+            event.sequence, self._account_id, self._ending
         )
 
     def _decrypt_string(self, event):
         """Decrypt the encrypted event content and parse it."""
-        _LOGGER.debug("Hub: Decrypt String: Original: %s", str(event.content))
-        resmsg = self._decrypter.decrypt(unhexlify(event.content)).decode(
+        _LOGGER.debug("Hub: Decrypt String: Original: %s", str(event.encrypted_content))
+        resmsg = self._decrypter.decrypt(unhexlify(event.encrypted_content)).decode(
             encoding="UTF-8", errors="replace"
         )
         _LOGGER.debug("Hub: Decrypt String: Decrypted: %s", resmsg)
@@ -372,10 +374,10 @@ class AlarmTCPHandler(socketserver.BaseRequestHandler):
 
     def handle_line(self, line):
         """Method called for each line that comes in."""
-        _LOGGER.debug("Income raw string: %s", line)
+        _LOGGER.debug("TCP: Handle Line: Income raw string: %s", line)
         try:
             event = SIAEvent(line)
-            _LOGGER.debug("TCP: Handle Line: event: %s", event)
+            _LOGGER.debug("TCP: Handle Line: event: %s", str(event))
             if not event.valid_message:
                 _LOGGER.error(
                     "TCP: Handle Line: CRC mismatch, received: %s, calculated: %s",
@@ -392,7 +394,7 @@ class AlarmTCPHandler(socketserver.BaseRequestHandler):
                 )
             response = HASS_PLATFORM.data[DOMAIN][event.account].process_event(event)
         except Exception as exc:
-            _LOGGER.error("TCP: Handle Line: %s", str(exc))
+            _LOGGER.error("TCP: Handle Line: error: %s", str(exc))
             timestamp = datetime.fromtimestamp(time.time()).strftime(
                 "_%H:%M:%S,%m-%d-%Y"
             )
