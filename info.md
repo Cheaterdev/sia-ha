@@ -1,4 +1,4 @@
-[![hacs][hacsbadge]](hacs)
+[![hacs][hacs_badge]](hacs)
 
 _Component to integrate with [SIA][sia], based on [CheaterDev's version][ch_sia]._
 
@@ -88,4 +88,4 @@ ASCII characters are 0-9 and ABCDEF, so a account is something like `346EB` and 
 [sia]: https://github.com/eavanvalkenburg/sia-ha
 [ch_sia]: https://github.com/Cheaterdev/sia-ha
 [hacs]: https://github.com/custom-components/hacs
-[hacsbadge]: https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge
+[hacs_badge]: https://img.shields.io/badge/HACS-Default-orange.svg)
