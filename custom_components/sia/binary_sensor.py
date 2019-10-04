@@ -21,15 +21,16 @@ DOMAIN = "sia"
 _LOGGER = logging.getLogger(__name__)
 
 
-def setup_platform(hass, config, add_entities, discovery_info=None):
+async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Implementation of platform setup from HA."""
-    devices = []
-    for account in hass.data[DOMAIN]:
-        for device in hass.data[DOMAIN][account]._states:
-            new_device = hass.data[DOMAIN][account]._states[device]
-            if isinstance(new_device, SIABinarySensor):
-                devices.append(new_device)
-    add_entities(devices)
+    devices = [
+        device
+        for hub in hass.data[DOMAIN].values()
+        for device in hub._states.values()
+        if isinstance(device, SIABinarySensor)
+    ]
+    _LOGGER.debug("SIABinarySensor: setup: devices: " + str(devices))
+    async_add_entities(devices)
 
 
 class SIABinarySensor(RestoreEntity):
@@ -58,9 +59,10 @@ class SIABinarySensor(RestoreEntity):
         await super().async_added_to_hass()
         state = await self.async_get_last_state()
         if state is not None and state.state is not None:
-            self._state = state.state == STATE_ON
+            self.state = state.state == STATE_ON
         else:
-            self._state = None
+            self.state = None
+        _LOGGER.debug("SIABinarySensor: added: state: " + str(state))
         self._async_track_unavailable()
 
     @property

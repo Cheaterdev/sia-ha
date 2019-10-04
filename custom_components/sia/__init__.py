@@ -119,7 +119,7 @@ PING_INTERVAL_MARGIN = timedelta(seconds=30)
 
 HASS_PLATFORM = None
 
-#final import here, because they rely on variables above
+# final import here, because they rely on variables above
 from .sia_event import SIAEvent
 from .alarm_control_panel import SIAAlarmControlPanel
 from .binary_sensor import SIABinarySensor
@@ -141,6 +141,10 @@ def setup(hass, config):
 
     for component in ["binary_sensor", "alarm_control_panel", "sensor"]:
         discovery.load_platform(hass, component, DOMAIN, {}, config)
+
+    for hub in HASS_PLATFORM.data[DOMAIN].values():
+        for sensor in hub._states.values():
+            sensor.async_schedule_update_ha_state()
 
     server = socketserver.TCPServer(("", port), AlarmTCPHandler)
 
@@ -193,8 +197,7 @@ class Hub:
         self._account_id = hub_config[CONF_ACCOUNT]
         self._hass = hass
         self._states = {}
-        self._zones = hub_config.get(CONF_ZONES)
-        self._sensor_ids = []
+        self._zones = [dict(z) for z in hub_config.get(CONF_ZONES)]
         self._ping_interval = timedelta(minutes=hub_config.get(CONF_PING_INTERVAL))
         self._encrypted = False
         self._ending = "]"
@@ -216,17 +219,17 @@ class Hub:
                 .decode(encoding="UTF-8")
                 .upper()
             )
-        # create the hub sensor
-        self._upsert_sensor(HUB_ZONE, DEVICE_CLASS_TIMESTAMP)
         # add sensors for each zone as specified in the config.
         for zone in self._zones:
             for sensor in zone.get(CONF_SENSORS):
                 self._upsert_sensor(zone.get(CONF_ZONE), sensor)
+        # create the hub sensor
+        self._upsert_sensor(HUB_ZONE, DEVICE_CLASS_TIMESTAMP)
 
     def _upsert_sensor(self, zone, sensor_type):
         """ checks if the entity exists, and creates otherwise. always gives back the entity_id """
         sensor_id = self._get_id(zone, sensor_type)
-        if not (sensor_id in self._sensor_ids):
+        if not (sensor_id in self._states.keys()):
             zone_found = False
             for existing_zone in self._zones:
                 # if the zone exists then a sensor is missing,
@@ -242,6 +245,14 @@ class Hub:
             # add the new sensor
             sensor_name = self._get_sensor_name(zone, sensor_type)
             constructor = self.sensor_types_classes.get(sensor_type)
+            _LOGGER.debug(
+                "Hub: upsert_sensor: Updating sensor: "
+                + sensor_name
+                + ", id: "
+                + sensor_id
+                + ", with constructor: "
+                + constructor
+            )
             if constructor and sensor_name:
                 new_sensor = eval(constructor)(
                     sensor_id,
@@ -251,12 +262,12 @@ class Hub:
                     self._ping_interval,
                     self._hass,
                 )
+                _LOGGER.debug("Hub: upsert_sensor: created sensor: " + str(new_sensor))
                 self._states[sensor_id] = new_sensor
             else:
                 _LOGGER.warning(
                     "Hub: Upsert Sensor: Unknown device type: %s", sensor_type
                 )
-            self._sensor_ids.append(sensor_id)
         return sensor_id
 
     def _get_id(self, zone=0, sensor_type=None):
@@ -337,9 +348,9 @@ class Hub:
                 + ", Message: "
                 + event.message
             )
-        # whenever a message comes in, the connection is good, so reset the availability clock for all devices.
-        for sensor in self._sensor_ids:
-            self._states[sensor].assume_available()
+        # whenever a message comes in, the connection is good, so reset the availability timer for all devices.
+        for sensor in self._states.values():
+            sensor.assume_available()
 
     def process_event(self, event):
         """Process the Event that comes from the TCP handler."""
@@ -353,9 +364,7 @@ class Hub:
             _LOGGER.error("Hub: Process Event: %s gave error %s", event, str(exc))
 
         # Even if decrypting or something else gives an error, create the acknowledgement message.
-        return '"ACK"{}L0#{}[{}'.format(
-            event.sequence, self._account_id, self._ending
-        )
+        return '"ACK"{}L0#{}[{}'.format(event.sequence, self._account_id, self._ending)
 
     def _decrypt_string(self, event):
         """Decrypt the encrypted event content and parse it."""

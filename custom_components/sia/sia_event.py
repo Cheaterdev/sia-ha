@@ -4,6 +4,7 @@ import re
 
 from . import _LOGGER
 
+
 class SIAEvent:
     """Class for SIA Events."""
 
@@ -88,7 +89,7 @@ class SIAEvent:
             self.receiver,
             self.prefix,
             self.account,
-            self.encrypted_content, 
+            self.encrypted_content,
             self.content,
             self.zone,
             self.code,

@@ -6,6 +6,7 @@ from homeassistant.core import callback
 from homeassistant.helpers.entity import generate_entity_id
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.components.alarm_control_panel import AlarmControlPanel
 from homeassistant.util.dt import utcnow
 
 from . import (
@@ -24,22 +25,26 @@ DOMAIN = "sia"
 _LOGGER = logging.getLogger(__name__)
 
 
-def setup_platform(hass, config, add_entities, discovery_info=None):
+async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Implementation of platform setup from HA."""
-    devices = []
-    for account in hass.data[DOMAIN]:
-        for device in hass.data[DOMAIN][account]._states:
-            new_device = hass.data[DOMAIN][account]._states[device]
-            if isinstance(new_device, SIAAlarmControlPanel):
-                devices.append(new_device)
+    devices = [
+        device
+        for hub in hass.data[DOMAIN].values()
+        for device in hub._states.values()
+        if isinstance(device, SIAAlarmControlPanel)
+    ]
+    _LOGGER.debug("SIAAlarmControlPanel: setup: devices: " + str(devices))
+    async_add_entities(devices)
 
-    add_entities(devices)
 
-
-class SIAAlarmControlPanel(RestoreEntity):
+class SIAAlarmControlPanel(AlarmControlPanel, RestoreEntity):
     """Class for SIA Alarm Control Panels."""
 
     def __init__(self, entity_id, name, device_class, zone, ping_interval, hass):
+        _LOGGER.debug(
+            "SIAAlarmControlPanel: init: Initializing SIA Alarm Control Panel: "
+            + entity_id
+        )
         self._should_poll = False
         self._entity_id = generate_entity_id(
             entity_id_format=ALARM_FORMAT, name=entity_id, hass=hass
@@ -50,28 +55,33 @@ class SIAAlarmControlPanel(RestoreEntity):
         self._attr = {CONF_PING_INTERVAL: self.ping_interval, CONF_ZONE: zone}
         self._is_available = True
         self._remove_unavailability_tracker = None
-        self._state = None
+        self._state = STATE_ALARM_DISARMED
 
     async def async_added_to_hass(self):
         """Once the panel is added, see if it was there before and pull in that state."""
         await super().async_added_to_hass()
         state = await self.async_get_last_state()
         if state is not None and state.state is not None:
+            _LOGGER.debug("SIAAlarmControlPanel: init: old state: " + state.state)
             if state.state == STATE_ALARM_ARMED_AWAY:
-                self._state = STATE_ALARM_ARMED_AWAY
+                self.state = STATE_ALARM_ARMED_AWAY
             elif state.state == STATE_ALARM_ARMED_NIGHT:
-                self._state = STATE_ALARM_ARMED_NIGHT
+                self.state = STATE_ALARM_ARMED_NIGHT
             elif state.state == STATE_ALARM_TRIGGERED:
-                self._state = STATE_ALARM_TRIGGERED
+                self.state = STATE_ALARM_TRIGGERED
             elif state.state == STATE_ALARM_DISARMED:
-                self._state = STATE_ALARM_DISARMED
+                self.state = STATE_ALARM_DISARMED
             elif state.state == STATE_ALARM_ARMED_CUSTOM_BYPASS:
-                self._state = STATE_ALARM_ARMED_CUSTOM_BYPASS
+                self.state = STATE_ALARM_ARMED_CUSTOM_BYPASS
             else:
-                self._state = None
+                self.state = None
         else:
-            self._state = STATE_ALARM_DISARMED  # assume disarmed
+            self.state = STATE_ALARM_DISARMED  # assume disarmed
+        _LOGGER.debug("SIAAlarmControlPanel: added: state: " + str(state))
         self._async_track_unavailable()
+        # async_dispatcher_connect(
+        #     self._hass, DATA_UPDATED, self._schedule_immediate_update
+        # )
 
     @property
     def entity_id(self):
