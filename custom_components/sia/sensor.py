@@ -67,6 +67,7 @@ class SIASensor(Entity):
     @state.setter
     def state(self, state):
         self._state = state
+        self.async_schedule_update_ha_state()
 
     def assume_available(self):
         """Stub method, to keep signature the same between all SIA components."""
