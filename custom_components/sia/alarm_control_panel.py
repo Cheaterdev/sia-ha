@@ -8,7 +8,13 @@ from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.components.alarm_control_panel import AlarmControlPanel
 from homeassistant.util.dt import utcnow
-
+from homeassistant.components.alarm_control_panel.const import (
+    SUPPORT_ALARM_ARM_AWAY,
+    SUPPORT_ALARM_ARM_CUSTOM_BYPASS,
+    SUPPORT_ALARM_ARM_HOME,
+    SUPPORT_ALARM_ARM_NIGHT,
+    SUPPORT_ALARM_TRIGGER,
+)
 from . import (
     ALARM_FORMAT,
     CONF_PING_INTERVAL,
@@ -170,3 +176,9 @@ class SIAAlarmControlPanel(AlarmControlPanel, RestoreEntity):
         self._remove_unavailability_tracker = None
         self._is_available = False
         self.async_schedule_update_ha_state()
+
+    @property
+    def supported_features(self) -> int:
+        """Return the list of supported features."""
+        return     SUPPORT_ALARM_ARM_AWAY | SUPPORT_ALARM_ARM_CUSTOM_BYPASS | SUPPORT_ALARM_ARM_HOME | SUPPORT_ALARM_ARM_NIGHT | SUPPORT_ALARM_TRIGGER
+
