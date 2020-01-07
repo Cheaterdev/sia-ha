@@ -4,6 +4,7 @@ import logging
 
 from homeassistant.core import callback
 from homeassistant.helpers.entity import generate_entity_id
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.components.alarm_control_panel import AlarmControlPanel
@@ -19,6 +20,7 @@ from . import (
     ALARM_FORMAT,
     CONF_PING_INTERVAL,
     CONF_ZONE,
+    DATA_UPDATED,
     PING_INTERVAL_MARGIN,
     STATE_ALARM_ARMED_AWAY,
     STATE_ALARM_ARMED_CUSTOM_BYPASS,
@@ -61,7 +63,7 @@ class SIAAlarmControlPanel(AlarmControlPanel, RestoreEntity):
         self._attr = {CONF_PING_INTERVAL: self.ping_interval, CONF_ZONE: zone}
         self._is_available = True
         self._remove_unavailability_tracker = None
-        self._state = STATE_ALARM_DISARMED
+        # self._state = STATE_ALARM_DISARMED
 
     async def async_added_to_hass(self):
         """Once the panel is added, see if it was there before and pull in that state."""
@@ -82,12 +84,14 @@ class SIAAlarmControlPanel(AlarmControlPanel, RestoreEntity):
             else:
                 self.state = None
         else:
-            self.state = STATE_ALARM_DISARMED  # assume disarmed
+            _LOGGER.debug("SIAAlarmControlPanel: no previous state.")
+            return
+            # self.state = STATE_ALARM_DISARMED  # assume disarmed
         _LOGGER.debug("SIAAlarmControlPanel: added: state: " + str(state))
         self._async_track_unavailable()
-        # async_dispatcher_connect(
-        #     self._hass, DATA_UPDATED, self._schedule_immediate_update
-        # )
+        async_dispatcher_connect(
+            self.hass, DATA_UPDATED, self._schedule_immediate_update
+        )
 
     @property
     def entity_id(self):

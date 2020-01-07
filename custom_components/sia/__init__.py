@@ -64,7 +64,7 @@ from homeassistant.util.dt import utcnow
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "sia"
-
+DATA_UPDATED = f"{DOMAIN}_data_updated"
 CONF_ACCOUNT = "account"
 CONF_ENCRYPTION_KEY = "encryption_key"
 CONF_HUBS = "hubs"
@@ -142,9 +142,9 @@ def setup(hass, config):
     for component in ["binary_sensor", "alarm_control_panel", "sensor"]:
         discovery.load_platform(hass, component, DOMAIN, {}, config)
 
-    for hub in HASS_PLATFORM.data[DOMAIN].values():
-        for sensor in hub._states.values():
-            sensor.async_schedule_update_ha_state()
+    # for hub in HASS_PLATFORM.data[DOMAIN].values():
+    #     for sensor in hub._states.values():
+    #         sensor.async_schedule_update_ha_state()
 
     server = socketserver.TCPServer(("", port), AlarmTCPHandler)
 
