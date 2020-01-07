@@ -4,6 +4,7 @@ import logging
 
 from homeassistant.core import callback
 from homeassistant.helpers.entity import generate_entity_id
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util.dt import utcnow
@@ -12,6 +13,7 @@ from . import (
     CONF_PING_INTERVAL,
     PING_INTERVAL_MARGIN,
     CONF_ZONE,
+    DATA_UPDATED,
     BINARY_SENSOR_FORMAT,
     STATE_ON,
     STATE_OFF,
@@ -36,24 +38,22 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 class SIABinarySensor(RestoreEntity):
     """Class for SIA Binary Sensors."""
 
-    def __init__(self, entity_id, name, device_class, zone, ping_interval, hass):
+    def __init__(
+        self, hub_name, entity_id, name, device_class, zone, ping_interval, hass
+    ):
         self._device_class = device_class
         self._should_poll = False
         self._ping_interval = ping_interval
         self._attr = {CONF_PING_INTERVAL: self.ping_interval, CONF_ZONE: zone}
-        self._entity_id = generate_entity_id(
+        self.entity_id = generate_entity_id(
             entity_id_format=BINARY_SENSOR_FORMAT, name=entity_id, hass=hass
         )
+        self._unique_id = f"{hub_name}-{self.entity_id}"
         self._name = name
         self.hass = hass
         self._is_available = True
         self._remove_unavailability_tracker = None
         self._state = None
-
-    @property
-    def entity_id(self):
-        """Get entity_id."""
-        return self._entity_id
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
@@ -64,6 +64,13 @@ class SIABinarySensor(RestoreEntity):
             self.state = None
         _LOGGER.debug("SIABinarySensor: added: state: " + str(state))
         self._async_track_unavailable()
+        async_dispatcher_connect(
+            self.hass, DATA_UPDATED, self._schedule_immediate_update
+        )
+
+    @callback
+    def _schedule_immediate_update(self):
+        self.async_schedule_update_ha_state(True)
 
     @property
     def name(self):
@@ -80,7 +87,7 @@ class SIABinarySensor(RestoreEntity):
 
     @property
     def unique_id(self) -> str:
-        return self._name
+        return self._unique_id
 
     @property
     def available(self):

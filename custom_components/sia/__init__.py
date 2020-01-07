@@ -64,7 +64,7 @@ from homeassistant.util.dt import utcnow
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "sia"
-
+DATA_UPDATED = f"{DOMAIN}_data_updated"
 CONF_ACCOUNT = "account"
 CONF_ENCRYPTION_KEY = "encryption_key"
 CONF_HUBS = "hubs"
@@ -255,6 +255,7 @@ class Hub:
             )
             if constructor and sensor_name:
                 new_sensor = eval(constructor)(
+                    self._name,
                     sensor_id,
                     sensor_name,
                     sensor_type,
