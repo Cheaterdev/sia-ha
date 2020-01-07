@@ -142,9 +142,9 @@ def setup(hass, config):
     for component in ["binary_sensor", "alarm_control_panel", "sensor"]:
         discovery.load_platform(hass, component, DOMAIN, {}, config)
 
-    # for hub in HASS_PLATFORM.data[DOMAIN].values():
-    #     for sensor in hub._states.values():
-    #         sensor.async_schedule_update_ha_state()
+    for hub in HASS_PLATFORM.data[DOMAIN].values():
+        for sensor in hub._states.values():
+            sensor.async_schedule_update_ha_state()
 
     server = socketserver.TCPServer(("", port), AlarmTCPHandler)
 
@@ -255,6 +255,7 @@ class Hub:
             )
             if constructor and sensor_name:
                 new_sensor = eval(constructor)(
+                    self._name,
                     sensor_id,
                     sensor_name,
                     sensor_type,
