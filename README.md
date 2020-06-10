@@ -2,6 +2,8 @@
 
 _Component to integrate with [SIA][sia], based on [CheaterDev's version][ch_sia]._
 
+_Latest beta will be suggested for inclusion as a official integration._
+
 **This component will set up the following platforms.**
 
 ## WARNING
@@ -10,22 +12,22 @@ This integration was tested with Ajax Systems security hub only. Other SIA hubs 
 
 Platform | Description
 -- | --
-`binary_sensor` | A smoke or moisture sensor.
-`alarm_control_panel` | Alarm panel with the state of the alarm.
-`sensor` | Sensor with the last heartbeat message from your system.
+`binary_sensor` | A smoke and moisture sensor, one of each per account and zone.
+`alarm_control_panel` | Alarm panel with the state of the alarm, one per account and zone.
+`sensor` | Sensor with the last heartbeat message from your system, one  per account.
 
 ## Features
 - Alarm tracking with a alarm_control_panel component
-- Optional Fire/gas tracker
-- Optional Water leak tracker
+- Fire/gas tracker
+- Water leak tracker
 - AES-128 CBC encryption support
 
-## Hub Setup(Ajax Systems Hub example)
+## Hub Setup (Ajax Systems Hub example)
 
 1. Select "SIA Protocol". 
 2. Enable "Connect on demand". 
 3. Place Account Id - 3-16 ASCII hex characters. For example AAA.
-4. Insert Home Assistant IP adress. It must be visible to hub. There is no cloud connection to it.
+4. Insert Home Assistant IP address. It must be a visible to hub. There is no cloud connection to it.
 5. Insert Home Assistant listening port. This port must not be used with anything else.
 6. Select Preferred Network. Ethernet is preferred if hub and HA in same network. Multiple networks are not tested.
 7. Enable Periodic Reports. The interval with which the alarm systems reports to the monitoring station, default is 1 minute. This component adds 30 seconds before setting the alarm unavailable to deal with slights latencies between ajax and HA and the async nature of HA.
@@ -34,52 +36,23 @@ Platform | Description
 ## Installation
 
 1. Click install.
-1. Add at least the minimum configuration to your HA configuration, see below.
+1. The latest version is only available through a config flow.
+1. After clicking the add button in the Integration pane, you full in the below fields.
 
-### Minimum config
-This is the least amount of information that needs to be in your config. This will result in a `sensor.hubname_last_heartbeat` being added after reboot. Dynamically any other sensors are added.
+If you have multiple accounts that you want to monitor you can choose to have both communicating with the same port, in that case, use the additional accounts checkbox in the config so setup the second (and more) accounts. You can also choose to have both running on a different port, in that case setup the component twice.
 
-```yaml
-sia:
-  port:  port
-  hubs:
-    - name: hubname
-      account: account
-```
-
-## Full configuration
-
-```yaml
-sia:
-  port:  port
-  hubs:
-    - name: hubname
-      account: account
-      encryption_key: password
-      ping_interval: pinginterval
-      zones:
-        - zone: 1
-          name: zonename
-          sensors:
-           - alarm
-           - moisture
-           - smoke
-```
+After setup you will see one entity per account for the heartbeat, and 3 entities for each zone per account, alarm, smoke sensor and moisture sensor. This means at least four entities are added, each will also have a device associated with it, so allow you to use the area feature. Unwanted sensors should be hidden in the interface.
 
 ## Configuration options
 
 Key | Type | Required | Description
 -- | -- | -- | --
 `port` | `int` | `True` | Port that SIA will listen on.
-`hubs` | `list` | `True` | List of all hubs to connect to.
-`name` | `string` | `True` | Used to generate sensor ids.
 `account` | `string` | `True` |  Hub account to track. 3-16 ASCII hex characters. Must be same, as in hub properties.
 `encryption_key` | `string` | `False` | Encoding key. 16 ASCII characters. Must be same, as in hub properties.
-`ping_interval` | `int` | `False` | Ping interval in minutes that the alarm system uses to send "Automatic communication test report" messages, the HA component adds 30 seconds before marking a device unavailable. Must be between 1 and 1440 minutes.
-`zones` | `list` | `False` | Manual definition of all zones present, if unspecified, only the hub sensor is added, and new sensors are added based on messages coming in.
-`zone` | `int` | `False` | ZoneID, must match the zone that the system sends, can be found in the log but also "discovered"
-`name` | `string` | `False` | Zone name, is used for the friendly name of your sensors, when you have the same sensortypes in multiple zones and this is not set, a `_1, _2, etc` is added by HA automatically.
-`sensors` | `list` | `False` | a list of sensors, must be of type: `alarm`, `moisture` (HA standard name for a leak sensor) or `smoke`
+`ping_interval` | `int` | `True` | Ping interval in minutes that the alarm system uses to send "Automatic communication test report" messages, the HA component adds 30 seconds before marking a device unavailable. Must be between 1 and 1440 minutes, default is 1.
+`zones` | `int` | `True` | The number of zones present for the account, default is 1.
+`additional_account` | `bool` | `True` | Used to ask for additional accounts in multiple steps during setup, default is False.
 
 ASCII characters are 0-9 and ABCDEF, so a account is something like `346EB` and the encryption key is the same but 16 characters.
 ***

@@ -1,70 +1,87 @@
 """Module for SIA Sensors."""
 
-import logging
 import datetime as dt
+import logging
 
-from homeassistant.core import callback
 from homeassistant.components.sensor import ENTITY_ID_FORMAT as SENSOR_FORMAT
+from homeassistant.const import CONF_ZONE
+from homeassistant.core import callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import Entity, generate_entity_id
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util.dt import utcnow
 
-from . import CONF_ZONE, CONF_PING_INTERVAL, DATA_UPDATED
+from .const import CONF_ACCOUNT, CONF_PING_INTERVAL, DATA_UPDATED, DOMAIN
 
-DOMAIN = "sia"
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    """Implementation of platform setup from HA."""
-    devices = [
-        device
-        for hub in hass.data[DOMAIN].values()
-        for device in hub._states.values()
-        if isinstance(device, SIASensor)
-    ]
-    _LOGGER.debug("SIASensor: setup: devices: " + str(devices))
-    async_add_entities(devices)
+async def async_setup_entry(hass, entry, async_add_devices):
+    """Set up sia_sensor from a config entry."""
+    async_add_devices(
+        [
+            device
+            for device in hass.data[DOMAIN][entry.entry_id].states.values()
+            if isinstance(device, SIASensor)
+        ]
+    )
+
+    return True
 
 
 class SIASensor(RestoreEntity):
     """Class for SIA Sensors."""
 
     def __init__(
-        self, hub_name, entity_id, name, device_class, zone, ping_interval, hass
+        self,
+        entity_id,
+        name,
+        device_class,
+        port,
+        account,
+        zone,
+        ping_interval,
+        hass
+        # self, entity_id, name,  zone, account, ping_interval, hass,
     ):
-        self._should_poll = False
-        self._device_class = device_class
-        self.entity_id = generate_entity_id(
-            entity_id_format=SENSOR_FORMAT, name=entity_id, hass=hass
-        )
-        self._unique_id = f"{hub_name}-{self.entity_id}"
-        self._state = utcnow()
-        self._attr = {CONF_PING_INTERVAL: str(ping_interval), CONF_ZONE: zone}
+        """Create SIASensor object."""
+        self.entity_id = SENSOR_FORMAT.format(entity_id)
+        self._unique_id = entity_id
         self._name = name
+        self._device_class = device_class
+        self._port = port
+        self._account = account
+        self._zone = zone
+        self._ping_interval = str(ping_interval)
         self.hass = hass
+
+        self._state = utcnow()
+        self._should_poll = False
+        self._attr = {
+            CONF_ACCOUNT: self._account,
+            CONF_PING_INTERVAL: self._ping_interval,
+            CONF_ZONE: self._zone,
+        }
 
     async def async_added_to_hass(self):
         """Once the sensor is added, see if it was there before and pull in that state."""
         await super().async_added_to_hass()
         state = await self.async_get_last_state()
         if state is not None and state.state is not None:
-            _LOGGER.debug("SIASensor: init: old state: " + state.state)
             self.state = dt.datetime.strptime(state.state, "%Y-%m-%dT%H:%M:%S.%f%z")
         else:
             return
-        _LOGGER.debug("SIASensor: added: state: " + str(state))
         async_dispatcher_connect(
             self.hass, DATA_UPDATED, self._schedule_immediate_update
         )
 
     @callback
     def _schedule_immediate_update(self):
+        """Schedule update."""
         self.async_schedule_update_ha_state(True)
 
     @property
     def name(self):
+        """Return name."""
         return self._name
 
     @property
@@ -74,10 +91,17 @@ class SIASensor(RestoreEntity):
 
     @property
     def state(self):
+        """Return state."""
         return self._state.isoformat()
 
     @property
+    def account(self):
+        """Return device account."""
+        return self._account
+
+    @property
     def device_state_attributes(self):
+        """Return attributes."""
         return self._attr
 
     def add_attribute(self, attr):
@@ -86,18 +110,30 @@ class SIASensor(RestoreEntity):
 
     @property
     def device_class(self):
+        """Return device class."""
         return self._device_class
 
     @state.setter
     def state(self, state):
+        """Set state."""
         self._state = state
         self.async_schedule_update_ha_state()
-
-    def assume_available(self):
-        """Stub method, to keep signature the same between all SIA components."""
-        pass
 
     @property
     def icon(self):
         """Return the icon to use in the frontend, if any."""
         return "mdi:alarm-light-outline"
+
+    @property
+    def unit_of_measurement(self):
+        """Return the unit of measurement."""
+        return "ISO8601"
+
+    @property
+    def device_info(self):
+        """Return the device_info."""
+        return {
+            "identifiers": {(DOMAIN, self.unique_id)},
+            "name": self.name,
+            "via_device": (DOMAIN, self._port, self._account),
+        }
