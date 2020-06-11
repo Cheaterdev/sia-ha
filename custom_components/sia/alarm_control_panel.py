@@ -1,11 +1,13 @@
 """Module for SIA Alarm Control Panels."""
 
 import logging
+from typing import Callable
 
 from homeassistant.components.alarm_control_panel import (
     ENTITY_ID_FORMAT as ALARM_FORMAT,
     AlarmControlPanelEntity,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CONF_ZONE,
     STATE_ALARM_ARMED_AWAY,
@@ -14,7 +16,7 @@ from homeassistant.const import (
     STATE_ALARM_DISARMED,
     STATE_ALARM_TRIGGERED,
 )
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -32,7 +34,9 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass, entry, async_add_devices):
+async def async_setup_entry(
+    hass, entry: ConfigEntry, async_add_devices: Callable[[], None]
+) -> bool:
     """Set up sia_alarm_control_panel from a config entry."""
     async_add_devices(
         [
@@ -48,7 +52,16 @@ async def async_setup_entry(hass, entry, async_add_devices):
 class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
     """Class for SIA Alarm Control Panels."""
 
-    def __init__(self, entity_id, name, port, account, zone, ping_interval, hass):
+    def __init__(
+        self,
+        entity_id: str,
+        name: str,
+        port: int,
+        account: str,
+        zone: int,
+        ping_interval: int,
+        hass: HomeAssistant,
+    ):
         """Create SIAAlarmControlPanel object."""
         self.entity_id = ALARM_FORMAT.format(entity_id)
         self._unique_id = entity_id
@@ -99,22 +112,22 @@ class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
         self.async_schedule_update_ha_state(True)
 
     @property
-    def name(self):
+    def name(self) -> str:
         """Get Name."""
         return self._name
 
     @property
-    def ping_interval(self):
+    def ping_interval(self) -> int:
         """Get ping_interval."""
         return str(self._ping_interval)
 
     @property
-    def state(self):
+    def state(self) -> str:
         """Get state."""
         return self._state
 
     @property
-    def account(self):
+    def account(self) -> str:
         """Return device account."""
         return self._account
 
@@ -124,17 +137,17 @@ class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
         return self._unique_id
 
     @property
-    def available(self):
+    def available(self) -> bool:
         """Get availability."""
         return self._is_available
 
     @property
-    def device_state_attributes(self):
+    def device_state_attributes(self) -> dict:
         """Return device attributes."""
         return self._attr
 
     @state.setter
-    def state(self, state):
+    def state(self, state: str):
         """Set state."""
         temp = self._old_state if state == PREVIOUS_STATE else state
         self._old_state = self._state
@@ -146,7 +159,7 @@ class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
         await self._async_track_unavailable()
 
     @callback
-    async def _async_track_unavailable(self):
+    async def _async_track_unavailable(self) -> bool:
         """Reset unavailability."""
         if self._remove_unavailability_tracker:
             self._remove_unavailability_tracker()
@@ -161,7 +174,7 @@ class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
         return False
 
     @callback
-    def _async_set_unavailable(self, now):
+    def _async_set_unavailable(self, _):
         """Set availability."""
         self._remove_unavailability_tracker = None
         self._is_available = False
@@ -173,7 +186,7 @@ class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
         return None
 
     @property
-    def device_info(self):
+    def device_info(self) -> dict:
         """Return the device_info."""
         return {
             "identifiers": {(DOMAIN, self.unique_id)},

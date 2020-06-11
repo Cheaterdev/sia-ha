@@ -5,16 +5,22 @@ import logging
 
 from pysiaalarm.aio import SIAAccount, SIAClient, SIAEvent
 
+from homeassistant.components.binary_sensor import (
+    DEVICE_CLASS_MOISTURE,
+    DEVICE_CLASS_SMOKE,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CONF_PORT,
     CONF_SENSORS,
     CONF_ZONE,
+    DEVICE_CLASS_TIMESTAMP,
     EVENT_HOMEASSISTANT_STOP,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.util.dt import utcnow
+from homeassistant.util.json import load_json
 
 from .alarm_control_panel import SIAAlarmControlPanel
 from .binary_sensor import SIABinarySensor
@@ -25,9 +31,6 @@ from .const import (
     CONF_PING_INTERVAL,
     CONF_ZONES,
     DEVICE_CLASS_ALARM,
-    DEVICE_CLASS_MOISTURE,
-    DEVICE_CLASS_SMOKE,
-    DEVICE_CLASS_TIMESTAMP,
     DOMAIN,
     HUB_SENSOR_NAME,
     HUB_ZONE,
@@ -84,7 +87,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
 class SIAHub:
     """Class for SIA Hubs."""
 
-    def __init__(self, hass, hub_config, entry_id, title):
+    def __init__(
+        self, hass: HomeAssistant, hub_config: dict, entry_id: str, title: str
+    ):
         """Create the SIAHub."""
         self._hass = hass
         self.states = {}
@@ -93,6 +98,7 @@ class SIAHub:
         self._title = title
         self._accounts = hub_config[CONF_ACCOUNTS]
         self.shutdown_remove_listener = None
+        self._reactions = REACTIONS
 
         self._zones = [
             {
@@ -134,7 +140,7 @@ class SIAHub:
                 )
 
     async def async_setup_hub(self):
-        """Add a device to the device_registry and register shutdown listener."""
+        """Add a device to the device_registry, register shutdown listener, load reactions."""
         device_registry = await dr.async_get_registry(self._hass)
         port = self._port
         for acc in self._accounts:
@@ -144,22 +150,24 @@ class SIAHub:
                 identifiers={(DOMAIN, port, account)},
                 name=f"{port} - {account}",
             )
-        self.shutdown_remove_listener = self.hass.bus.async_listen_once(
+        self.shutdown_remove_listener = self._hass.bus.async_listen_once(
             EVENT_HOMEASSISTANT_STOP, self.async_shutdown
         )
 
-    async def async_shutdown(self):
+    async def async_shutdown(self, _: Event):
         """Shutdown the SIA server."""
         await self.sia_client.stop()
 
-    def _create_sensor(self, port, account, zone, entity_type, ping):
+    def _create_sensor(
+        self, port: int, account: str, zone: int, entity_type: str, ping: int
+    ):
         """Check if the entity exists, and creates otherwise."""
         entity_id, entity_name = self._get_entity_id_and_name(
             account, zone, entity_type
         )
         if entity_type == DEVICE_CLASS_ALARM:
             new_entity = SIAAlarmControlPanel(
-                entity_id, entity_name, port, account, zone, ping, self._hass,
+                entity_id, entity_name, port, account, zone, ping, self._hass
             )
         elif entity_type in (DEVICE_CLASS_MOISTURE, DEVICE_CLASS_SMOKE):
             new_entity = SIABinarySensor(
@@ -185,31 +193,31 @@ class SIAHub:
             )
         self.states[entity_id] = new_entity
 
-    def _get_entity_id_and_name(self, account, zone=0, entity_type=None):
+    def _get_entity_id_and_name(
+        self, account: str, zone: int = 0, entity_type: str = None
+    ):
         """Give back a entity_id and name according to the variables."""
         if zone == 0:
             return (
                 self._get_entity_id(account, zone, entity_type),
                 f"{self._port} - {account} - Last Heartbeat",
             )
-        else:
-            if entity_type:
-                return (
-                    self._get_entity_id(account, zone, entity_type),
-                    f"{self._port} - {account} - zone {zone} - {entity_type}",
-                )
-            return None
+        if entity_type:
+            return (
+                self._get_entity_id(account, zone, entity_type),
+                f"{self._port} - {account} - zone {zone} - {entity_type}",
+            )
+        return None
 
-    def _get_entity_id(self, account, zone=0, entity_type=None):
+    def _get_entity_id(self, account: str, zone: int = 0, entity_type: str = None):
         """Give back a entity_id according to the variables, defaults to the hub sensor entity_id."""
         if zone == 0 or entity_type == DEVICE_CLASS_TIMESTAMP:
             return f"{self._port}_{account}_{HUB_SENSOR_NAME}"
-        else:
-            if entity_type:
-                return f"{self._port}_{account}_{zone}_{entity_type}"
-            return None
+        if entity_type:
+            return f"{self._port}_{account}_{zone}_{entity_type}"
+        return None
 
-    def _get_ping_interval(self, account):
+    def _get_ping_interval(self, account: str):
         """Return the ping interval for specified account."""
         for acc in self._accounts:
             if acc[CONF_ACCOUNT] == account:
@@ -223,7 +231,7 @@ class SIAHub:
 
         """
         # find the reactions for that code (if any)
-        reaction = REACTIONS.get(event.code)
+        reaction = self._reactions.get(event.code)
         if not reaction:
             _LOGGER.warning(
                 "Unhandled event code: %s, Message: %s, Full event: %s",

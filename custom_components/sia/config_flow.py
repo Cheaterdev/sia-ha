@@ -49,7 +49,7 @@ ACCOUNT_SCHEMA = vol.Schema(
 )
 
 
-def validate_input(data):
+def validate_input(data: dict) -> bool:
     """Validate the input by the user."""
     SIAAccount(data[CONF_ACCOUNT], data.get(CONF_ENCRYPTION_KEY))
 
@@ -74,7 +74,7 @@ class SIAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_PUSH
     data = None
 
-    async def async_step_add_account(self, user_input=None):
+    async def async_step_add_account(self, user_input: dict = None):
         """Handle the additional accounts steps."""
         errors = {}
         if user_input is not None:
@@ -102,7 +102,7 @@ class SIAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=ACCOUNT_SCHEMA, errors=errors,
         )
 
-    async def async_step_user(self, user_input=None):
+    async def async_step_user(self, user_input: dict = None):
         """Handle the initial step."""
         errors = {}
         if user_input is not None:
@@ -128,13 +128,13 @@ class SIAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         self.data[CONF_ACCOUNTS].append(add_data)
                     await self.async_set_unique_id(f"{DOMAIN}_{self.data[CONF_PORT]}")
                     self._abort_if_unique_id_configured()
+
                     if not user_input[CONF_ADDITIONAL_ACCOUNTS]:
                         return self.async_create_entry(
                             title=f"SIA Alarm on port {self.data[CONF_PORT]}",
                             data=self.data,
                         )
-                    else:
-                        return await self.async_step_add_account()
+                    return await self.async_step_add_account()
             except InvalidKeyFormatError:
                 errors["base"] = "invalid_key_format"
             except InvalidKeyLengthError:
