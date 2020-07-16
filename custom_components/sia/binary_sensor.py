@@ -56,7 +56,6 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
         hass: HomeAssistant,
     ):
         """Create SIABinarySensor object."""
-
         self.entity_id = BINARY_SENSOR_FORMAT.format(entity_id)
         self._unique_id = entity_id
         self._name = name
