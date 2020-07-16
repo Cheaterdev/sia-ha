@@ -3,6 +3,10 @@
   "name": "SIA Alarm Systems",
   "config_flow": true,
   "documentation": "https://www.home-assistant.io/integrations/sia",
-  "requirements": ["pysiaalarm==2.0.3"],
-  "codeowners": ["@eavanvalkenburg"]
+  "requirements": [
+    "pysiaalarm==2.0.5"
+  ],
+  "codeowners": [
+    "@eavanvalkenburg"
+  ]
 }

@@ -66,7 +66,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Unload a config entry."""
-
     await hass.data[DOMAIN][entry.entry_id].sia_client.stop()
     hass.data[DOMAIN][entry.entry_id].shutdown_remove_listener()
     unload_ok = all(
@@ -131,13 +130,7 @@ class SIAHub:
         self.sia_client = SIAClient(
             "", self._port, self.sia_accounts, self.update_states
         )
-
-        for zone in self._zones:
-            ping = self._get_ping_interval(zone[CONF_ACCOUNT])
-            for sensor in zone[CONF_SENSORS]:
-                self._create_sensor(
-                    self._port, zone[CONF_ACCOUNT], zone[CONF_ZONE], sensor, ping
-                )
+        self._create_sensors()
 
     async def async_setup_hub(self):
         """Add a device to the device_registry, register shutdown listener, load reactions."""
@@ -158,6 +151,15 @@ class SIAHub:
         """Shutdown the SIA server."""
         await self.sia_client.stop()
 
+    def _create_sensors(self):
+        """Create all the sensors."""
+        for zone in self._zones:
+            ping = self._get_ping_interval(zone[CONF_ACCOUNT])
+            for entity_type in zone[CONF_SENSORS]:
+                self._create_sensor(
+                    self._port, zone[CONF_ACCOUNT], zone[CONF_ZONE], entity_type, ping
+                )
+
     def _create_sensor(
         self, port: int, account: str, zone: int, entity_type: str, ping: int
     ):
@@ -166,11 +168,12 @@ class SIAHub:
             account, zone, entity_type
         )
         if entity_type == DEVICE_CLASS_ALARM:
-            new_entity = SIAAlarmControlPanel(
+            self.states[entity_id] = SIAAlarmControlPanel(
                 entity_id, entity_name, port, account, zone, ping, self._hass
             )
-        elif entity_type in (DEVICE_CLASS_MOISTURE, DEVICE_CLASS_SMOKE):
-            new_entity = SIABinarySensor(
+            return
+        if entity_type in (DEVICE_CLASS_MOISTURE, DEVICE_CLASS_SMOKE):
+            self.states[entity_id] = SIABinarySensor(
                 entity_id,
                 entity_name,
                 entity_type,
@@ -180,8 +183,9 @@ class SIAHub:
                 ping,
                 self._hass,
             )
-        elif entity_type == DEVICE_CLASS_TIMESTAMP:
-            new_entity = SIASensor(
+            return
+        if entity_type == DEVICE_CLASS_TIMESTAMP:
+            self.states[entity_id] = SIASensor(
                 entity_id,
                 entity_name,
                 entity_type,
@@ -191,7 +195,6 @@ class SIAHub:
                 ping,
                 self._hass,
             )
-        self.states[entity_id] = new_entity
 
     def _get_entity_id_and_name(
         self, account: str, zone: int = 0, entity_type: str = None
@@ -233,13 +236,13 @@ class SIAHub:
         # find the reactions for that code (if any)
         reaction = self._reactions.get(event.code)
         if not reaction:
-            _LOGGER.warning(
-                "Unhandled event code: %s, Message: %s, Full event: %s",
+            _LOGGER.info(
+                "Unhandled event code, will be set as attribute in the heartbeat. Code is: %s, Message: %s, Full event: %s",
                 event.code,
                 event.message,
                 event.sia_string,
             )
-            return
+            reaction = {"type": DEVICE_CLASS_TIMESTAMP, "attr": LAST_MESSAGE}
         attr = reaction.get("attr")
         new_state = reaction.get("new_state")
         new_state_eval = reaction.get("new_state_eval")
