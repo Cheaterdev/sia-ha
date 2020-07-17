@@ -262,11 +262,18 @@ class SIAHub:
                         "last_message": f"{utcnow().isoformat()}: SIA: {event.sia_string}, Message: {event.message}"
                     }
                 )
+                
+        for entity in self.states.values():
+            if entity.account == event.account and not isinstance(entity, SIASensor):
+                try:
+                    await entity.assume_available()
+                except Exception:
+                    pass
 
-        await asyncio.gather(
-            *[
-                entity.assume_available()
-                for entity in self.states.values()
-                if entity.account == event.account and not isinstance(entity, SIASensor)
-            ]
-        )
+        # await asyncio.gather(
+        #     *[
+        #         entity.assume_available()
+        #         for entity in self.states.values()
+        #         if entity.account == event.account and not isinstance(entity, SIASensor)
+        #     ]
+        # )
