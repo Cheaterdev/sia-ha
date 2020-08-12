@@ -237,7 +237,7 @@ class SIAHub:
         reaction = self._reactions.get(event.code)
         if not reaction:
             _LOGGER.info(
-                "Unhandled event code, will be set as attribute in the heartbeat. Code is: %s, Message: %s, Full event: %s",
+                "Unhandled event code, will be set as attribute in the heartbeat sensor. Code is: %s, Message: %s, Full event: %s",
                 event.code,
                 event.message,
                 event.sia_string,
@@ -262,18 +262,13 @@ class SIAHub:
                         "last_message": f"{utcnow().isoformat()}: SIA: {event.sia_string}, Message: {event.message}"
                     }
                 )
-                
-        for entity in self.states.values():
-            if entity.account == event.account and not isinstance(entity, SIASensor):
-                try:
-                    await entity.assume_available()
-                except Exception:
-                    pass
 
-        # await asyncio.gather(
-        #     *[
-        #         entity.assume_available()
-        #         for entity in self.states.values()
-        #         if entity.account == event.account and not isinstance(entity, SIASensor)
-        #     ]
-        # )
+        # ignore exceptions (those are returned now, but not read) to deal with disabled sensors.
+        await asyncio.gather(
+            *[
+                entity.assume_available()
+                for entity in self.states.values()
+                if entity.account == event.account and not isinstance(entity, SIASensor)
+            ],
+            return_exceptions=True,
+        )

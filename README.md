@@ -1,6 +1,6 @@
 [![hacs][hacsbadge]](hacs)
 
-_Component to integrate with [SIA][sia], based on [CheaterDev's version][ch_sia]._
+_Component to integrate with [SIA], based on [CheaterDev's version][ch_sia]._
 
 _Latest beta will be suggested for inclusion as a official integration._
 
@@ -12,12 +12,12 @@ This integration was tested with Ajax Systems security hub only. Other SIA hubs 
 
 Platform | Description
 -- | --
-`binary_sensor` | A smoke and moisture sensor, one of each per account and zone.
-`alarm_control_panel` | Alarm panel with the state of the alarm, one per account and zone.
-`sensor` | Sensor with the last heartbeat message from your system, one  per account.
+`binary_sensor` | A smoke and moisture sensor, one of each per account and zone. You can disable these sensors if you do not have those devices.
+`alarm_control_panel` | Alarm panel with the state of the alarm, one per account and zone. You can disable this sensor if you have zones defined with just sensors and no alarm.
+`sensor` | Sensor with the last heartbeat message from your system, one  per account. Please do not disable this sensor as it will show you the status of the connection.
 
 ## Features
-- Alarm tracking with a alarm_control_panel component
+- Alarm tracking with a alarm_control_panel component, but no alarm setting
 - Fire/gas tracker
 - Water leak tracker
 - AES-128 CBC encryption support
@@ -57,7 +57,7 @@ Key | Type | Required | Description
 ASCII characters are 0-9 and ABCDEF, so a account is something like `346EB` and the encryption key is the same but 16 characters.
 ***
 
-[sia]: https://github.com/eavanvalkenburg/sia-ha
+[SIA]: https://github.com/eavanvalkenburg/sia-ha
 [ch_sia]: https://github.com/Cheaterdev/sia-ha
 [hacs]: https://github.com/custom-components/hacs
 [hacsbadge]: https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge
