@@ -205,12 +205,12 @@ class SIAHub:
             event.account, int(event.zone), reaction["type"]
         )
 
-        if new_state:
+        if new_state is not None:
             self.states[entity_id].state = new_state
-        elif new_state_eval:
+        elif new_state_eval is not None:
             if new_state_eval == UTCNOW:
                 self.states[entity_id].state = utcnow()
-        if attr:
+        if attr is not None:
             if attr == LAST_MESSAGE:
                 self.states[entity_id].add_attribute(
                     {
