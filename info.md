@@ -36,51 +36,18 @@ Platform | Description
 1. Click install.
 1. Add at least the minimum configuration to your HA configuration, see below.
 
-### Minimum config
-This is the least amount of information that needs to be in your config. This will result in a `sensor.hubname_last_heartbeat` being added after reboot. Dynamically any other sensors are added.
-
-```yaml
-sia:
-  port:  port
-  hubs:
-    - name: hubname
-      account: account
-```
-
-{% endif %}
-## Full configuration
-
-```yaml
-sia:
-  port:  port
-  hubs:
-    - name: hubname
-      account: account
-      encryption_key: password
-      ping_interval: pinginterval
-      zones:
-        - zone: 1
-          name: zonename
-          sensors:
-           - alarm
-           - moisture
-           - smoke
-```
 
 ## Configuration options
+
 
 Key | Type | Required | Description
 -- | -- | -- | --
 `port` | `int` | `True` | Port that SIA will listen on.
-`hubs` | `list` | `True` | List of all hubs to connect to.
-`name` | `string` | `True` | Used to generate sensor ids.
 `account` | `string` | `True` |  Hub account to track. 3-16 ASCII hex characters. Must be same, as in hub properties.
 `encryption_key` | `string` | `False` | Encoding key. 16 ASCII characters. Must be same, as in hub properties.
-`ping_interval` | `int` | `False` | Ping interval in minutes that the alarm system uses to send "Automatic communication test report" messages, the HA component adds 30 seconds before marking a device unavailable. Must be between 1 and 1440 minutes.
-`zones` | `list` | `False` | Manual definition of all zones present, if unspecified, only the hub sensor is added, and new sensors are added based on messages coming in.
-`zone` | `int` | `False` | ZoneID, must match the zone that the system sends, can be found in the log but also "discovered"
-`name` | `string` | `False` | Zone name, is used for the friendly name of your sensors, when you have the same sensortypes in multiple zones and this is not set, a `_1, _2, etc` is added by HA automatically.
-`sensors` | `list` | `False` | a list of sensors, must be of type: `alarm`, `moisture` (HA standard name for a leak sensor) or `smoke`
+`ping_interval` | `int` | `True` | Ping interval in minutes that the alarm system uses to send "Automatic communication test report" messages, the HA component adds 30 seconds before marking a device unavailable. Must be between 1 and 1440 minutes, default is 1.
+`zones` | `int` | `True` | The number of zones present for the account, default is 1.
+`additional_account` | `bool` | `True` | Used to ask for additional accounts in multiple steps during setup, default is False.
 
 ASCII characters are 0-9 and ABCDEF, so a account is something like `346EB` and the encryption key is the same but 16 characters.
 ***
