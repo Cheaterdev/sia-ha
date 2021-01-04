@@ -28,6 +28,8 @@ LAST_MESSAGE = "last_message"
 PLATFORMS = [SENSOR_DOMAIN, BINARY_SENSOR_DOMAIN, ALARM_CONTROL_PANEL_DOMAIN]
 
 REACTIONS = {
+    "AT": {"type": "timestamp", "attr": "last_message"},
+    "AR": {"type": "timestamp", "attr": "last_message"},
     "BA": {"type": "alarm", "new_state": "triggered"},
     "PA": {"type": "alarm", "new_state": "triggered"},
     "JA": {"type": "alarm", "new_state": "triggered"},
@@ -45,8 +47,10 @@ REACTIONS = {
     "FH": {"type": "smoke", "new_state": False},
     "KA": {"type": "smoke", "new_state": True},
     "KH": {"type": "smoke", "new_state": False},
+    "NC": {"type": "alarm", "new_state": "armed_night"},
     "NL": {"type": "alarm", "new_state": "armed_night"},
-    "NP": {"type": "alarm", "new_state": "disarmed"},
+    "NP": {"type": "alarm", "new_state": "previous_state"},
+    "NO": {"type": "alarm", "new_state": "previous_state"},
     "OA": {"type": "alarm", "new_state": "disarmed"},
     "OG": {"type": "alarm", "new_state": "disarmed"},
     "OP": {"type": "alarm", "new_state": "disarmed"},
@@ -59,18 +63,16 @@ REACTIONS = {
     "WH": {"type": "moisture", "new_state": False},
     "YG": {"type": "timestamp", "attr": "last_message"},
     "YC": {"type": "timestamp", "attr": "last_message"},
-    "ZZ": {"type": "timestamp", "attr": "last_message"},
-    "ZY": {"type": "timestamp", "attr": "last_message"},
     "XI": {"type": "timestamp", "attr": "last_message"},
     "YM": {"type": "timestamp", "attr": "last_message"},
     "YA": {"type": "timestamp", "attr": "last_message"},
     "YS": {"type": "timestamp", "attr": "last_message"},
     "XQ": {"type": "timestamp", "attr": "last_message"},
     "XH": {"type": "timestamp", "attr": "last_message"},
-    "AT": {"type": "timestamp", "attr": "last_message"},
-    "AR": {"type": "timestamp", "attr": "last_message"},
     "YT": {"type": "timestamp", "attr": "last_message"},
     "YR": {"type": "timestamp", "attr": "last_message"},
     "TR": {"type": "timestamp", "attr": "last_message"},
+    "ZZ": {"type": "timestamp", "attr": "last_message"},
+    "ZY": {"type": "timestamp", "attr": "last_message"},
 }
 
