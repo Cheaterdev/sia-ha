@@ -57,6 +57,16 @@ Key | Type | Required | Description
 ASCII characters are 0-9 and ABCDEF, so a account is something like `346EB` and the encryption key is the same but 16 characters.
 ***
 
+## Debugging
+To turn on debugging go into your `configuration.yaml` and add these lines:
+```yaml
+logger:
+  default: error
+  logs:
+    custom_components.sia: debug 
+    pysiaalarm: debug
+```
+
 [SIA]: https://github.com/eavanvalkenburg/sia-ha
 [ch_sia]: https://github.com/Cheaterdev/sia-ha
 [hacs]: https://github.com/custom-components/hacs
