@@ -202,7 +202,7 @@ class SIAHub:
         new_state = reaction.get("new_state")
         new_state_eval = reaction.get("new_state_eval")
         entity_id = self._get_entity_id(
-            event.account, int(event.zone), reaction["type"]
+            event.account, int(event.ri), reaction["type"]
         )
 
         if new_state is not None:
