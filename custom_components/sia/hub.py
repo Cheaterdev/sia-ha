@@ -8,6 +8,7 @@ from pysiaalarm.aio import SIAAccount, SIAClient, SIAEvent
 from homeassistant.components.binary_sensor import (
     DEVICE_CLASS_MOISTURE,
     DEVICE_CLASS_SMOKE,
+    DEVICE_CLASS_POWER,
 )
 from homeassistant.const import (
     CONF_PORT,
@@ -74,6 +75,7 @@ class SIAHub:
                         DEVICE_CLASS_ALARM,
                         DEVICE_CLASS_MOISTURE,
                         DEVICE_CLASS_SMOKE,
+                        DEVICE_CLASS_POWER,
                     ],
                 }
                 for a in self._accounts
@@ -130,7 +132,7 @@ class SIAHub:
                 entity_id, entity_name, port, account, zone, ping
             )
             return
-        if entity_type in (DEVICE_CLASS_MOISTURE, DEVICE_CLASS_SMOKE):
+        if entity_type in (DEVICE_CLASS_MOISTURE, DEVICE_CLASS_SMOKE, DEVICE_CLASS_POWER):
             self.states[entity_id] = SIABinarySensor(
                 entity_id, entity_name, entity_type, port, account, zone, ping
             )
@@ -158,7 +160,7 @@ class SIAHub:
 
     def _get_entity_id(self, account: str, zone: int = 0, entity_type: str = None):
         """Give back a entity_id according to the variables, defaults to the hub sensor entity_id."""
-        if zone == 0 or entity_type == DEVICE_CLASS_TIMESTAMP:
+        if zone == 0 and entity_type == DEVICE_CLASS_TIMESTAMP:
             return f"{self._port}_{account}_{HUB_SENSOR_NAME}"
         if entity_type:
             return f"{self._port}_{account}_{zone}_{entity_type}"
