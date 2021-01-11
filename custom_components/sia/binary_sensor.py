@@ -53,7 +53,6 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
         account: str,
         zone: int,
         ping_interval: int,
-        hass: HomeAssistant,
     ):
         """Create SIABinarySensor object."""
         self.entity_id = BINARY_SENSOR_FORMAT.format(entity_id)
@@ -64,7 +63,6 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
         self._account = account
         self._zone = zone
         self._ping_interval = ping_interval
-        self.hass = hass
 
         self._should_poll = False
         self._is_on = None
@@ -142,15 +140,25 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
         """Return true if the binary sensor is on."""
         return self._is_on
 
+    @property
+    def should_poll(self) -> bool:
+        """Return True if entity has to be polled for state.
+
+        False if entity pushes its state to HA.
+        """
+        return False
+
     @state.setter
     def state(self, new_on: bool):
         """Set state."""
         self._is_on = new_on
-        self.async_schedule_update_ha_state()
+        if not self.registry_entry.disabled:
+            self.async_schedule_update_ha_state()
 
     async def assume_available(self):
         """Reset unavalability tracker."""
-        await self._async_track_unavailable()
+        if not self.registry_entry.disabled:
+            await self._async_track_unavailable()
 
     @callback
     async def _async_track_unavailable(self) -> bool:

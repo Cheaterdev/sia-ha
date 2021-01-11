@@ -44,7 +44,6 @@ class SIASensor(RestoreEntity):
         account: str,
         zone: int,
         ping_interval: int,
-        hass: HomeAssistant,
     ):
         """Create SIASensor object."""
         self.entity_id = SENSOR_FORMAT.format(entity_id)
@@ -55,7 +54,6 @@ class SIASensor(RestoreEntity):
         self._account = account
         self._zone = zone
         self._ping_interval = str(ping_interval)
-        self.hass = hass
 
         self._state = utcnow()
         self._should_poll = False
@@ -112,6 +110,14 @@ class SIASensor(RestoreEntity):
         self._attr.update(attr)
 
     @property
+    def should_poll(self) -> bool:
+        """Return True if entity has to be polled for state.
+
+        False if entity pushes its state to HA.
+        """
+        return False
+        
+    @property
     def device_class(self) -> str:
         """Return device class."""
         return self._device_class
@@ -120,7 +126,8 @@ class SIASensor(RestoreEntity):
     def state(self, state: dt.datetime):
         """Set state."""
         self._state = state
-        self.async_schedule_update_ha_state()
+        if not self.registry_entry.disabled:
+            self.async_schedule_update_ha_state()
 
     @property
     def icon(self) -> str:
