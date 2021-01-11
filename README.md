@@ -12,7 +12,7 @@ This integration was tested with Ajax Systems security hub only. Other SIA hubs 
 
 Platform | Description
 -- | --
-`binary_sensor` | A smoke and moisture sensor, one of each per account and zone. You can disable these sensors if you do not have those devices.
+`binary_sensor` | A smoke and moisture sensor, one of each per account and zone. Power sensor for the hub. You can disable these sensors if you do not have those devices.
 `alarm_control_panel` | Alarm panel with the state of the alarm, one per account and zone. You can disable this sensor if you have zones defined with just sensors and no alarm.
 `sensor` | Sensor with the last heartbeat message from your system, one  per account. Please do not disable this sensor as it will show you the status of the connection.
 
@@ -20,6 +20,7 @@ Platform | Description
 - Alarm tracking with a alarm_control_panel component, but no alarm setting
 - Fire/gas tracker
 - Water leak tracker
+- Hub Power status tracker
 - AES-128 CBC encryption support
 
 ## Hub Setup (Ajax Systems Hub example)

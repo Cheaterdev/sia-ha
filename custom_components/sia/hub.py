@@ -8,6 +8,7 @@ from pysiaalarm.aio import SIAAccount, SIAClient, SIAEvent
 from homeassistant.components.binary_sensor import (
     DEVICE_CLASS_MOISTURE,
     DEVICE_CLASS_SMOKE,
+    DEVICE_CLASS_POWER,
 )
 from homeassistant.const import (
     CONF_PORT,
@@ -61,7 +62,7 @@ class SIAHub:
             {
                 CONF_ACCOUNT: a[CONF_ACCOUNT],
                 CONF_ZONE: HUB_ZONE,
-                CONF_SENSORS: [DEVICE_CLASS_TIMESTAMP],
+                CONF_SENSORS: [DEVICE_CLASS_TIMESTAMP, DEVICE_CLASS_POWER],
             }
             for a in self._accounts
         ]
@@ -135,6 +136,13 @@ class SIAHub:
                 entity_id, entity_name, entity_type, port, account, zone, ping
             )
             return
+
+        if entity_type == DEVICE_CLASS_POWER:
+            self.states[entity_id] = SIABinarySensor(
+                entity_id, entity_name, entity_type, port, account, zone, ping
+            )
+            return
+
         if entity_type == DEVICE_CLASS_TIMESTAMP:
             self.states[entity_id] = SIASensor(
                 entity_id, entity_name, entity_type, port, account, zone, ping
@@ -145,8 +153,14 @@ class SIAHub:
     ):
         """Give back a entity_id and name according to the variables."""
         if zone == 0:
+            if entity_type == DEVICE_CLASS_POWER:
+                return (
+                        self._get_entity_id(account, zone, entity_type),
+                    f"{self._port} - {account} - Power",
+                )
+
             return (
-                self._get_entity_id(account, zone, entity_type),
+                    self._get_entity_id(account, zone, entity_type),
                 f"{self._port} - {account} - Last Heartbeat",
             )
         if entity_type:
@@ -158,6 +172,8 @@ class SIAHub:
 
     def _get_entity_id(self, account: str, zone: int = 0, entity_type: str = None):
         """Give back a entity_id according to the variables, defaults to the hub sensor entity_id."""
+        if entity_type == DEVICE_CLASS_POWER:
+            return f"{self._port}_{account}_{entity_type}"
         if zone == 0 or entity_type == DEVICE_CLASS_TIMESTAMP:
             return f"{self._port}_{account}_{HUB_SENSOR_NAME}"
         if entity_type:

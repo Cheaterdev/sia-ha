@@ -28,8 +28,8 @@ LAST_MESSAGE = "last_message"
 PLATFORMS = [SENSOR_DOMAIN, BINARY_SENSOR_DOMAIN, ALARM_CONTROL_PANEL_DOMAIN]
 
 REACTIONS = {
-    "AT": {"type": "timestamp", "attr": "last_message"},
-    "AR": {"type": "timestamp", "attr": "last_message"},
+    "AT": {"type": "power", "new_state": False},
+    "AR": {"type": "power", "new_state": True},
     "BA": {"type": "alarm", "new_state": "triggered"},
     "PA": {"type": "alarm", "new_state": "triggered"},
     "JA": {"type": "alarm", "new_state": "triggered"},
