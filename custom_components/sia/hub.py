@@ -131,18 +131,11 @@ class SIAHub:
                 entity_id, entity_name, port, account, zone, ping
             )
             return
-        if entity_type in (DEVICE_CLASS_MOISTURE, DEVICE_CLASS_SMOKE):
+        if entity_type in (DEVICE_CLASS_MOISTURE, DEVICE_CLASS_SMOKE, DEVICE_CLASS_POWER):
             self.states[entity_id] = SIABinarySensor(
                 entity_id, entity_name, entity_type, port, account, zone, ping
             )
             return
-
-        if entity_type == DEVICE_CLASS_POWER:
-            self.states[entity_id] = SIABinarySensor(
-                entity_id, entity_name, entity_type, port, account, zone, ping
-            )
-            return
-
         if entity_type == DEVICE_CLASS_TIMESTAMP:
             self.states[entity_id] = SIASensor(
                 entity_id, entity_name, entity_type, port, account, zone, ping
@@ -153,15 +146,10 @@ class SIAHub:
     ):
         """Give back a entity_id and name according to the variables."""
         if zone == 0:
-            if entity_type == DEVICE_CLASS_POWER:
-                return (
-                        self._get_entity_id(account, zone, entity_type),
-                    f"{self._port} - {account} - Power",
-                )
-
+            entity_type_name = "Last Heartbeat" if entity_type == DEVICE_CLASS_TIMESTAMP else "Power"
             return (
-                    self._get_entity_id(account, zone, entity_type),
-                f"{self._port} - {account} - Last Heartbeat",
+                self._get_entity_id(account, zone, entity_type),
+                f"{self._port} - {account} - {entity_type_name}",
             )
         if entity_type:
             return (
@@ -172,10 +160,10 @@ class SIAHub:
 
     def _get_entity_id(self, account: str, zone: int = 0, entity_type: str = None):
         """Give back a entity_id according to the variables, defaults to the hub sensor entity_id."""
-        if entity_type == DEVICE_CLASS_POWER:
+        if zone == 0:
+            if entity_type == DEVICE_CLASS_TIMESTAMP:
+                return f"{self._port}_{account}_{HUB_SENSOR_NAME}"
             return f"{self._port}_{account}_{entity_type}"
-        if zone == 0 or entity_type == DEVICE_CLASS_TIMESTAMP:
-            return f"{self._port}_{account}_{HUB_SENSOR_NAME}"
         if entity_type:
             return f"{self._port}_{account}_{zone}_{entity_type}"
         return None
@@ -221,15 +209,21 @@ class SIAHub:
             event.account, int(event.ri), reaction["type"]
         )
 
+        #update state
         if new_state is not None:
             self.states[entity_id].state = new_state
         elif new_state_eval is not None:
             if new_state_eval == UTCNOW:
                 self.states[entity_id].state = utcnow()
+
+        #update standard attributes of the touched sensor and if necessary the last_message or other attributes
+        self.states[entity_id].add_attribute( { "last_message": {event.message} })
+        self.states[entity_id].add_attribute( { "last_code": {event.code} })
+        self.states[entity_id].add_attribute( { "last_update": {utcnow().isoformat()} })
         if attr is not None:
             if attr == LAST_MESSAGE:
                 self.states[entity_id].add_attribute(
                     {
-                        "last_message": f"{utcnow().isoformat()}: SIA: {event.sia_string}, Message: {event.message}"
+                        "last_sia_event_string": "SIA: {event.sia_string}"                        
                     }
                 )
