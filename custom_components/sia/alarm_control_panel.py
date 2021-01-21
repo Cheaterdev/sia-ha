@@ -149,6 +149,10 @@ class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
         """Return device attributes."""
         return self._attr
 
+    def add_attribute(self, attr: dict):
+        """Update attributes."""
+        self._attr.update(attr)
+        
     @property
     def should_poll(self) -> bool:
         """Return True if entity has to be polled for state.
