@@ -155,6 +155,10 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
         if not self.registry_entry.disabled:
             self.async_schedule_update_ha_state()
 
+    def add_attribute(self, attr: dict):
+        """Update attributes."""
+        self._attr.update(attr)
+        
     async def assume_available(self):
         """Reset unavalability tracker."""
         if not self.registry_entry.disabled:
