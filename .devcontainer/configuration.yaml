@@ -1,6 +1,7 @@
 default_config:
+debugpy:
 
-  logger:
-    default: error
-    logs:
-      custom_components.sia: debug
+logger:
+  default: info
+  logs:
+    custom_components.sia: debug

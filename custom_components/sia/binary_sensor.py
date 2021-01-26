@@ -6,38 +6,97 @@ from typing import Callable
 from homeassistant.components.binary_sensor import (
     ENTITY_ID_FORMAT as BINARY_SENSOR_FORMAT,
     BinarySensorEntity,
+    DEVICE_CLASS_MOISTURE,
+    DEVICE_CLASS_POWER,
+    DEVICE_CLASS_SMOKE,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ZONE, STATE_OFF, STATE_ON, STATE_UNKNOWN
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import CONF_PORT, CONF_ZONE, STATE_OFF, STATE_ON, STATE_UNKNOWN
+from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util.dt import utcnow
 
 from .const import (
+    ATTR_LAST_CODE,
+    ATTR_LAST_MESSAGE,
+    ATTR_LAST_TIMESTAMP,
     CONF_ACCOUNT,
+    CONF_ACCOUNTS,
     CONF_PING_INTERVAL,
+    CONF_ZONES,
     DATA_UPDATED,
+    EVENT_CODE,
+    EVENT_ZONE,
+    EVENT_MESSAGE,
+    EVENT_TIMESTAMP,
+    HUB_ZONE,
+    SIA_EVENT,
     DOMAIN,
     PING_INTERVAL_MARGIN,
 )
+from .helpers import GET_ENTITY_AND_NAME, GET_PING_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
+ZONE_DEVICES = [
+    DEVICE_CLASS_MOISTURE,
+    DEVICE_CLASS_SMOKE,
+]
+CODE_CONSEQUENCES = {
+    "AT": (DEVICE_CLASS_POWER, False),
+    "AR": (DEVICE_CLASS_POWER, True),
+    "GA": (DEVICE_CLASS_SMOKE, True),
+    "GH": (DEVICE_CLASS_SMOKE, False),
+    "FA": (DEVICE_CLASS_SMOKE, True),
+    "FH": (DEVICE_CLASS_SMOKE, False),
+    "KA": (DEVICE_CLASS_SMOKE, True),
+    "KH": (DEVICE_CLASS_SMOKE, False),
+    "WA": (DEVICE_CLASS_MOISTURE, True),
+    "WH": (DEVICE_CLASS_MOISTURE, False),
+}
+
 
 async def async_setup_entry(
-    hass, entry: ConfigEntry, async_add_devices: Callable[[], None]
+    hass: HomeAssistant, entry: ConfigEntry, async_add_devices: Callable[[], None]
 ) -> bool:
     """Set up sia_binary_sensor from a config entry."""
-    async_add_devices(
+
+    devices = [
+        SIABinarySensor(
+            *GET_ENTITY_AND_NAME(
+                entry.data[CONF_PORT], acc[CONF_ACCOUNT], zone, device_class
+            ),
+            entry.data[CONF_PORT],
+            acc[CONF_ACCOUNT],
+            zone,
+            acc[CONF_PING_INTERVAL],
+            device_class,
+        )
+        for acc in entry.data[CONF_ACCOUNTS]
+        for zone in range(1, acc[CONF_ZONES] + 1)
+        for device_class in ZONE_DEVICES
+    ]
+    devices.extend(
         [
-            device
-            for device in hass.data[DOMAIN][entry.entry_id].states.values()
-            if isinstance(device, SIABinarySensor)
+            SIABinarySensor(
+                *GET_ENTITY_AND_NAME(
+                    entry.data[CONF_PORT],
+                    acc[CONF_ACCOUNT],
+                    HUB_ZONE,
+                    DEVICE_CLASS_POWER,
+                ),
+                entry.data[CONF_PORT],
+                acc[CONF_ACCOUNT],
+                HUB_ZONE,
+                acc[CONF_PING_INTERVAL],
+                DEVICE_CLASS_POWER,
+            )
+            for acc in entry.data[CONF_ACCOUNTS]
         ]
     )
-
+    async_add_devices(devices)
     return True
 
 
@@ -48,11 +107,11 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
         self,
         entity_id: str,
         name: str,
-        device_class: str,
         port: int,
         account: str,
         zone: int,
         ping_interval: int,
+        device_class: str,
     ):
         """Create SIABinarySensor object."""
         self.entity_id = BINARY_SENSOR_FORMAT.format(entity_id)
@@ -62,7 +121,9 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
         self._port = port
         self._account = account
         self._zone = zone
-        self._ping_interval = ping_interval
+        self._ping_interval = GET_PING_INTERVAL(ping_interval)
+        self._event_listener_str = f"{SIA_EVENT}_{port}_{account}"
+        self._unsub = None
 
         self._should_poll = False
         self._is_on = None
@@ -70,8 +131,11 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
         self._remove_unavailability_tracker = None
         self._attr = {
             CONF_ACCOUNT: self._account,
-            CONF_PING_INTERVAL: str(self._ping_interval),
+            CONF_PING_INTERVAL: self.ping_interval,
             CONF_ZONE: self._zone,
+            ATTR_LAST_MESSAGE: None,
+            ATTR_LAST_CODE: None,
+            ATTR_LAST_TIMESTAMP: None,
         }
 
     async def async_added_to_hass(self):
@@ -87,11 +151,46 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
         async_dispatcher_connect(
             self.hass, DATA_UPDATED, self._schedule_immediate_update
         )
+        self._unsub = self.hass.bus.async_listen(
+            self._event_listener_str, self.async_handle_event
+        )
+        self.async_on_remove(self._sia_on_remove)
+
+    @callback
+    def _sia_on_remove(self):
+        """Remove the unavailability and event listener."""
+        if self._unsub:
+            self._unsub()
+        if self._remove_unavailability_tracker:
+            self._remove_unavailability_tracker()
 
     @callback
     def _schedule_immediate_update(self):
         """Schedule update."""
         self.async_schedule_update_ha_state(True)
+
+    async def async_handle_event(self, event: Event):
+        """Listen to events for this port and account and update states.
+
+        If the port and account combo receives any message it means it is online and can therefore be set to available.
+        """
+        await self.assume_available()
+        if (
+            int(event.data[EVENT_ZONE]) == self._zone
+            or self._device_class == DEVICE_CLASS_POWER
+        ):
+            device_class, new_state = CODE_CONSEQUENCES.get(
+                event.data[EVENT_CODE], (None, None)
+            )
+            if new_state is not None and device_class == self._device_class:
+                self._attr.update(
+                    {
+                        ATTR_LAST_MESSAGE: event.data[EVENT_MESSAGE],
+                        ATTR_LAST_CODE: event.data[EVENT_CODE],
+                        ATTR_LAST_TIMESTAMP: event.data[EVENT_TIMESTAMP],
+                    }
+                )
+                self.state = new_state
 
     @property
     def name(self) -> str:

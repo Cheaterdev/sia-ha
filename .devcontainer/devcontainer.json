@@ -1,6 +1,6 @@
 // See https://aka.ms/vscode-remote/devcontainer.json for format details.
 {
-	"image": "ludeeus/container:integration",
+	"image": "ludeeus/container:integration-debian",
 	"context": "..",
 	"appPort": [
 		"9123:8123"
@@ -8,12 +8,16 @@
 	"postCreateCommand": "container install",
 	"runArgs": [
 		"-v",
-		"${env:HOME}${env:USERPROFILE}/.ssh:/tmp/.ssh"
+		"${env:HOME}${env:USERPROFILE}/.ssh:/tmp/.ssh",
+		// "--network=host",
+		"--add-host=host.docker.internal:host-gateway"
 	],
 	"extensions": [
 		"ms-python.vscode-pylance",
+		"visualstudioexptteam.vscodeintellicode",
 		"github.vscode-pull-request-github",
-		"tabnine.tabnine-vscode"
+		"redhat.vscode-yaml",
+		"esbenp.prettier-vscode"
 	],
 	"settings": {
 		"files.eol": "\n",
