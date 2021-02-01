@@ -13,9 +13,7 @@ CONF_ENCRYPTION_KEY = "encryption_key"
 CONF_ZONES = "zones"
 
 DOMAIN = "sia"
-DATA_UNSUBSCRIBE = "unsubs"
 DATA_UPDATED = f"{DOMAIN}_data_updated"
-SIA_HUB = "sia_hub"
 SIA_EVENT = "sia_event"
 HUB_SENSOR_NAME = "last_heartbeat"
 HUB_ZONE = 0

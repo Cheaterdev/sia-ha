@@ -6,11 +6,9 @@ import logging
 
 from pysiaalarm.aio import SIAAccount, SIAClient, SIAEvent
 
-from homeassistant.core import Event, EventOrigin
-from homeassistant.const import CONF_PORT
-from homeassistant.core import Event, HomeAssistant
+from homeassistant.core import Event, EventOrigin, HomeAssistant
+from homeassistant.const import CONF_PORT, EVENT_HOMEASSISTANT_STOP
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.typing import EventType
 
 from .const import (
     CONF_ACCOUNT,
@@ -26,6 +24,8 @@ from .const import (
     DOMAIN,
     SIA_EVENT,
 )
+
+ALLOWED_TIMEBAND = (300, 150)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,8 +43,9 @@ class SIAHub:
         self._title = title
         self._accounts = hub_config[CONF_ACCOUNTS]
 
+        self._remove_shutdown_listener = None
         self.sia_accounts = [
-            SIAAccount(a[CONF_ACCOUNT], a.get(CONF_ENCRYPTION_KEY), (300, 150))
+            SIAAccount(a[CONF_ACCOUNT], a.get(CONF_ENCRYPTION_KEY), ALLOWED_TIMEBAND)
             for a in self._accounts
         ]
         self.sia_client = SIAClient(
@@ -62,24 +63,28 @@ class SIAHub:
                 identifiers={(DOMAIN, port, account)},
                 name=f"{port} - {account}",
             )
+        self._remove_shutdown_listener = self._hass.bus.async_listen(
+            EVENT_HOMEASSISTANT_STOP, self.async_shutdown
+        )
 
-    async def async_shutdown(self, _: Event):
+    async def async_shutdown(self, _: Event = None):
         """Shutdown the SIA server."""
+        if self._remove_shutdown_listener:
+            self._remove_shutdown_listener()
         await self.sia_client.stop()
 
     async def async_create_and_fire_event(self, event: SIAEvent):
         """Create a event on HA's bus, with the data from the SIAEvent."""
-        event_data = {
-            EVENT_PORT: self._port,
-            EVENT_ACCOUNT: event.account,
-            EVENT_ZONE: event.ri,
-            EVENT_CODE: event.code,
-            EVENT_MESSAGE: event.message,
-            EVENT_ID: event.id,
-            EVENT_TIMESTAMP: event.timestamp,
-        }
         self._hass.bus.async_fire(
-            f"{SIA_EVENT}_{self._port}_{event.account}",
-            event_data,
+            event_type=f"{SIA_EVENT}_{self._port}_{event.account}",
+            event_data={
+                EVENT_PORT: self._port,
+                EVENT_ACCOUNT: event.account,
+                EVENT_ZONE: event.ri,
+                EVENT_CODE: event.code,
+                EVENT_MESSAGE: event.message,
+                EVENT_ID: event.id,
+                EVENT_TIMESTAMP: event.timestamp,
+            },
             origin=EventOrigin.remote,
         )

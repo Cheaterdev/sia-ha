@@ -191,6 +191,8 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
                     }
                 )
                 self.state = new_state
+                if not self.registry_entry.disabled:
+                    self.async_schedule_update_ha_state()
 
     @property
     def name(self) -> str:
@@ -241,18 +243,13 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
 
     @property
     def should_poll(self) -> bool:
-        """Return True if entity has to be polled for state.
-
-        False if entity pushes its state to HA.
-        """
+        """Return False if entity pushes its state to HA."""
         return False
 
     @state.setter
     def state(self, new_on: bool):
         """Set state."""
         self._is_on = new_on
-        if not self.registry_entry.disabled:
-            self.async_schedule_update_ha_state()
 
     async def assume_available(self):
         """Reset unavalability tracker."""
