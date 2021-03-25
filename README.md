@@ -26,12 +26,13 @@ Platform | Description
 
 1. Select "SIA Protocol". 
 2. Enable "Connect on demand". 
-3. Place Account Id - 3-16 ASCII hex characters. For example AAA.
+3. Place Account Id/Object number - 3-16 ASCII hex characters. For example AAA.
 4. Insert Home Assistant IP address. It must be a visible to hub. There is no cloud connection to it.
 5. Insert Home Assistant listening port. This port must not be used with anything else.
 6. Select Preferred Network. Ethernet is preferred if hub and HA in same network. Multiple networks are not tested.
 7. Enable Periodic Reports. The interval with which the alarm systems reports to the monitoring station, default is 1 minute. This component adds 30 seconds before setting the alarm unavailable to deal with slights latencies between ajax and HA and the async nature of HA.
 8. Encryption is on your risk. There is no CPU or network hit, so it's preferred. Password is 16 ASCII characters.
+9. Keep in mind that Monitoring Station will say "Connected" in the app if configured correctly. The sensors will have state "Unknown" until they get a new state. Arm/disarm to update the alarm sensor as an example.
 
 ## Installation
 
