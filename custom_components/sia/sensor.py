@@ -1,5 +1,4 @@
 """Module for SIA Sensors."""
-
 import datetime as dt
 import logging
 from typing import Callable
@@ -7,36 +6,31 @@ from typing import Callable
 from homeassistant.components.sensor import ENTITY_ID_FORMAT as SENSOR_FORMAT
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PORT, CONF_ZONE, DEVICE_CLASS_TIMESTAMP
-from homeassistant.core import HomeAssistant, callback, Event
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util.dt import utcnow
+from pysiaalarm import SIAEvent
 
 from .const import (
-    ATTR_LAST_CODE,
-    ATTR_LAST_MESSAGE,
-    ATTR_LAST_TIMESTAMP,
     CONF_ACCOUNT,
     CONF_ACCOUNTS,
     CONF_PING_INTERVAL,
     DATA_UPDATED,
-    EVENT_CODE,
-    EVENT_MESSAGE,
-    EVENT_TIMESTAMP,
+    DOMAIN,
     HUB_ZONE,
     SIA_EVENT,
-    DOMAIN,
 )
-from .helpers import GET_ENTITY_AND_NAME, GET_PING_INTERVAL
+from .helpers import GET_ENTITY_AND_NAME, GET_PING_INTERVAL, SIA_EVENT_TO_ATTR
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_devices: Callable[[], None]
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: Callable[[], None]
 ) -> bool:
     """Set up sia_sensor from a config entry."""
-    async_add_devices(
+    async_add_entities(
         [
             SIASensor(
                 *GET_ENTITY_AND_NAME(
@@ -83,55 +77,39 @@ class SIASensor(RestoreEntity):
         self._unsub = None
 
         self._state = utcnow()
-        self._should_poll = False
         self._attr = {
             CONF_ACCOUNT: self._account,
             CONF_PING_INTERVAL: self.ping_interval,
             CONF_ZONE: self._zone,
-            ATTR_LAST_MESSAGE: None,
-            ATTR_LAST_CODE: None,
-            ATTR_LAST_TIMESTAMP: None,
         }
 
-    async def async_added_to_hass(self):
+    async def async_added_to_hass(self) -> None:
         """Once the sensor is added, see if it was there before and pull in that state."""
         await super().async_added_to_hass()
         state = await self.async_get_last_state()
         if state is not None and state.state is not None:
             self.state = dt.datetime.strptime(state.state, "%Y-%m-%dT%H:%M:%S.%f%z")
-        else:
-            return
-        async_dispatcher_connect(
-            self.hass, DATA_UPDATED, self._schedule_immediate_update
-        )
+
+        async_dispatcher_connect(self.hass, DATA_UPDATED, self.async_write_ha_state)
         self._unsub = self.hass.bus.async_listen(
             self._event_listener_str, self.async_handle_event
         )
-        self.async_on_remove(self._sia_on_remove)
+        self.async_on_remove(self._async_sia_on_remove)
 
     @callback
-    def _sia_on_remove(self):
+    def _async_sia_on_remove(self):
         """Remove the event listener."""
         if self._unsub:
             self._unsub()
 
-    @callback
-    def _schedule_immediate_update(self):
-        """Schedule update."""
-        self.async_schedule_update_ha_state(True)
-
     async def async_handle_event(self, event: Event):
         """Listen to events for this port and account and update the state and attributes."""
-        self._attr.update(
-            {
-                ATTR_LAST_MESSAGE: event.data[EVENT_MESSAGE],
-                ATTR_LAST_CODE: event.data[EVENT_CODE],
-                ATTR_LAST_TIMESTAMP: event.data[EVENT_TIMESTAMP],
-            }
-        )
-        if event.data[EVENT_CODE] == "RP":
+        sia_event = SIAEvent.from_dict(event.data)
+        sia_event.message_type = sia_event.message_type.value
+        self._attr.update(sia_event.to_dict())
+        if sia_event.code == "RP":
             self.state = utcnow()
-        if not self.registry_entry.disabled:
+        if self.enabled:
             self.async_schedule_update_ha_state()
 
     @property

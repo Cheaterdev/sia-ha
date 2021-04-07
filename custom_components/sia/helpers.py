@@ -1,8 +1,19 @@
-from typing import Tuple
 from datetime import timedelta
+from typing import Tuple
 
 from homeassistant.const import DEVICE_CLASS_TIMESTAMP
-from .const import HUB_SENSOR_NAME, HUB_ZONE
+from pysiaalarm import SIAEvent
+
+from .const import (
+    HUB_SENSOR_NAME,
+    HUB_ZONE,
+    EVENT_ACCOUNT,
+    EVENT_CODE,
+    EVENT_ID,
+    EVENT_ZONE,
+    EVENT_MESSAGE,
+    EVENT_TIMESTAMP,
+)
 
 
 def GET_ENTITY_AND_NAME(
@@ -41,3 +52,17 @@ def GET_ENTITY_ID(
     if entity_type:
         return f"{port}_{account}_{zone}_{entity_type}"
     return None
+
+
+def SIA_EVENT_TO_ATTR(event: SIAEvent) -> dict:
+    """Create the attributes dict from a SIAEvent."""
+    return (
+        {
+            EVENT_ACCOUNT: event.account,
+            EVENT_ZONE: event.ri,
+            EVENT_CODE: event.code,
+            EVENT_MESSAGE: event.message,
+            EVENT_ID: event.id,
+            EVENT_TIMESTAMP: event.timestamp,
+        }
+    )

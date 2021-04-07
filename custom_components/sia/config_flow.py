@@ -1,6 +1,10 @@
 """Config flow for sia integration."""
 import logging
 
+import voluptuous as vol
+from homeassistant import config_entries, exceptions
+from homeassistant.const import CONF_PORT
+from homeassistant.data_entry_flow import AbortFlow
 from pysiaalarm import (
     InvalidAccountFormatError,
     InvalidAccountLengthError,
@@ -8,11 +12,6 @@ from pysiaalarm import (
     InvalidKeyLengthError,
     SIAAccount,
 )
-import voluptuous as vol
-
-from homeassistant import config_entries, exceptions
-from homeassistant.const import CONF_PORT
-from homeassistant.data_entry_flow import AbortFlow
 
 from .const import (
     CONF_ACCOUNT,
@@ -49,9 +48,9 @@ ACCOUNT_SCHEMA = vol.Schema(
 )
 
 
-def validate_input(data: dict) -> bool:
+def validate_input(data: dict):
     """Validate the input by the user."""
-    SIAAccount(data[CONF_ACCOUNT], data.get(CONF_ENCRYPTION_KEY))
+    SIAAccount.validate_account(data[CONF_ACCOUNT], data.get(CONF_ENCRYPTION_KEY))
 
     try:
         ping = int(data[CONF_PING_INTERVAL])
@@ -63,8 +62,6 @@ def validate_input(data: dict) -> bool:
         assert zones > 0
     except AssertionError:
         raise InvalidZones
-
-    return True
 
 
 class SIAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -79,12 +76,10 @@ class SIAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input is not None:
             try:
-                if validate_input(user_input):
-                    add_data = user_input.copy()
-                    add_data.pop(CONF_ADDITIONAL_ACCOUNTS)
-                    self.data[CONF_ACCOUNTS].append(add_data)
-                    if user_input[CONF_ADDITIONAL_ACCOUNTS]:
-                        return await self.async_step_add_account()
+                validate_input(user_input)
+                self.update_data(user_input)
+                if user_input[CONF_ADDITIONAL_ACCOUNTS]:
+                    return await self.async_step_add_account()
             except InvalidKeyFormatError:
                 errors["base"] = "invalid_key_format"
             except InvalidKeyLengthError:
@@ -99,7 +94,9 @@ class SIAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_zones"
 
         return self.async_show_form(
-            step_id="user", data_schema=ACCOUNT_SCHEMA, errors=errors,
+            step_id="user",
+            data_schema=ACCOUNT_SCHEMA,
+            errors=errors,
         )
 
     async def async_step_user(self, user_input: dict = None):
@@ -107,34 +104,16 @@ class SIAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input is not None:
             try:
-                if validate_input(user_input):
-                    if not self.data:
-                        self.data = {
-                            CONF_PORT: user_input[CONF_PORT],
-                            CONF_ACCOUNTS: [
-                                {
-                                    CONF_ACCOUNT: user_input[CONF_ACCOUNT],
-                                    CONF_ENCRYPTION_KEY: user_input.get(
-                                        CONF_ENCRYPTION_KEY
-                                    ),
-                                    CONF_PING_INTERVAL: user_input[CONF_PING_INTERVAL],
-                                    CONF_ZONES: user_input[CONF_ZONES],
-                                }
-                            ],
-                        }
-                    else:
-                        add_data = user_input.copy()
-                        add_data.pop(CONF_ADDITIONAL_ACCOUNTS)
-                        self.data[CONF_ACCOUNTS].append(add_data)
-                    await self.async_set_unique_id(f"{DOMAIN}_{self.data[CONF_PORT]}")
-                    self._abort_if_unique_id_configured()
-
-                    if not user_input[CONF_ADDITIONAL_ACCOUNTS]:
-                        return self.async_create_entry(
-                            title=f"SIA Alarm on port {self.data[CONF_PORT]}",
-                            data=self.data,
-                        )
-                    return await self.async_step_add_account()
+                validate_input(user_input)
+                await self.async_set_unique_id(f"{DOMAIN}_{self.data[CONF_PORT]}")
+                self._abort_if_unique_id_configured()
+                self.update_data(user_input)
+                if not user_input[CONF_ADDITIONAL_ACCOUNTS]:
+                    return self.async_create_entry(
+                        title=f"SIA Alarm on port {self.data[CONF_PORT]}",
+                        data=self.data,
+                    )
+                return await self.async_step_add_account()
             except InvalidKeyFormatError:
                 errors["base"] = "invalid_key_format"
             except InvalidKeyLengthError:
@@ -156,6 +135,25 @@ class SIAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user", data_schema=HUB_SCHEMA, errors=errors
         )
+
+    def update_data(self, user_input):
+        """Parse the user_input and store in self.data."""
+        if not self.data:
+            self.data = {
+                CONF_PORT: user_input[CONF_PORT],
+                CONF_ACCOUNTS: [
+                    {
+                        CONF_ACCOUNT: user_input[CONF_ACCOUNT],
+                        CONF_ENCRYPTION_KEY: user_input.get(CONF_ENCRYPTION_KEY),
+                        CONF_PING_INTERVAL: user_input[CONF_PING_INTERVAL],
+                        CONF_ZONES: user_input[CONF_ZONES],
+                    }
+                ],
+            }
+        else:
+            add_data = user_input.copy()
+            add_data.pop(CONF_ADDITIONAL_ACCOUNTS)
+            self.data[CONF_ACCOUNTS].append(add_data)
 
 
 class InvalidPing(exceptions.HomeAssistantError):

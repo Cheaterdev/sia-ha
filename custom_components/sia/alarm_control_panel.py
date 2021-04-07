@@ -2,6 +2,7 @@
 
 import logging
 from typing import Callable
+from pysiaalarm import SIAEvent
 
 from homeassistant.components.alarm_control_panel import (
     ENTITY_ID_FORMAT as ALARM_FORMAT,
@@ -25,15 +26,14 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util.dt import utcnow
 
 from .const import (
-    ATTR_LAST_CODE,
-    ATTR_LAST_MESSAGE,
-    ATTR_LAST_TIMESTAMP,
     CONF_ACCOUNT,
     CONF_ACCOUNTS,
     CONF_PING_INTERVAL,
     CONF_ZONES,
     DATA_UPDATED,
+    EVENT_ACCOUNT,
     EVENT_CODE,
+    EVENT_ID,
     EVENT_ZONE,
     EVENT_MESSAGE,
     EVENT_TIMESTAMP,
@@ -41,7 +41,7 @@ from .const import (
     DOMAIN,
     PING_INTERVAL_MARGIN,
 )
-from .helpers import GET_ENTITY_AND_NAME, GET_PING_INTERVAL
+from .helpers import GET_ENTITY_AND_NAME, GET_PING_INTERVAL, SIA_EVENT_TO_ATTR
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -75,10 +75,10 @@ CODE_CONSEQUENCES = {
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_devices: Callable[[], None]
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: Callable[[], None]
 ) -> bool:
     """Set up SIA alarm_control_panel(s) from a config entry."""
-    async_add_devices(
+    async_add_entities(
         [
             SIAAlarmControlPanel(
                 *GET_ENTITY_AND_NAME(
@@ -119,7 +119,6 @@ class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
         self._event_listener_str = f"{SIA_EVENT}_{port}_{account}"
         self._unsub = None
 
-        self._should_poll = False
         self._is_available = True
         self._remove_unavailability_tracker = None
         self._state = None
@@ -128,9 +127,12 @@ class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
             CONF_ACCOUNT: self._account,
             CONF_PING_INTERVAL: self.ping_interval,
             CONF_ZONE: self._zone,
-            ATTR_LAST_MESSAGE: None,
-            ATTR_LAST_CODE: None,
-            ATTR_LAST_TIMESTAMP: None,
+            EVENT_ACCOUNT: None,
+            EVENT_CODE: None,
+            EVENT_ID: None,
+            EVENT_ZONE: None,
+            EVENT_MESSAGE: None,
+            EVENT_TIMESTAMP: None,
         }
 
     async def async_added_to_hass(self):
@@ -158,16 +160,14 @@ class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
         else:
             self.state = None
         await self._async_track_unavailable()
-        async_dispatcher_connect(
-            self.hass, DATA_UPDATED, self._schedule_immediate_update
-        )
+        async_dispatcher_connect(self.hass, DATA_UPDATED, self.async_write_ha_state)
         self._unsub = self.hass.bus.async_listen(
             self._event_listener_str, self.async_handle_event
         )
-        self.async_on_remove(self._sia_on_remove)
+        self.async_on_remove(self._async_sia_on_remove)
 
     @callback
-    def _sia_on_remove(self):
+    def _async_sia_on_remove(self):
         """Remove the unavailability and event listener."""
         if self._unsub:
             self._unsub()
@@ -180,23 +180,16 @@ class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
         If the port and account combo receives any message it means it is online and can therefore be set to available.
         """
         await self.assume_available()
-        if int(event.data[EVENT_ZONE]) == self._zone:
-            new_state = CODE_CONSEQUENCES.get(event.data[EVENT_CODE])
-            if new_state:
-                self._attr.update(
-                    {
-                        ATTR_LAST_MESSAGE: event.data[EVENT_MESSAGE],
-                        ATTR_LAST_CODE: event.data[EVENT_CODE],
-                        ATTR_LAST_TIMESTAMP: event.data[EVENT_TIMESTAMP],
-                    }
-                )
-                self.state = new_state
-                if not self.registry_entry.disabled:
-                    self.async_schedule_update_ha_state()
-
-    @callback
-    def _schedule_immediate_update(self):
-        self.async_schedule_update_ha_state(True)
+        sia_event = SIAEvent.from_dict(event.data)
+        if int(sia_event.ri) != self._zone:
+            return
+        new_state = CODE_CONSEQUENCES.get(sia_event.code)
+        if not new_state:
+            return
+        self._attr.update(SIA_EVENT_TO_ATTR(sia_event))
+        self.state = new_state
+        if self.enabled:
+            self.async_schedule_update_ha_state()
 
     @property
     def name(self) -> str:
@@ -212,6 +205,13 @@ class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
     def state(self) -> str:
         """Get state."""
         return self._state
+
+    @state.setter
+    def state(self, state: str):
+        """Set state."""
+        temp = self._old_state if state == PREVIOUS_STATE else state
+        self._old_state = self._state
+        self._state = temp
 
     @property
     def account(self) -> str:
@@ -237,13 +237,6 @@ class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
     def should_poll(self) -> bool:
         """Return False if entity pushes its state to HA."""
         return False
-
-    @state.setter
-    def state(self, state: str):
-        """Set state."""
-        temp = self._old_state if state == PREVIOUS_STATE else state
-        self._old_state = self._state
-        self._state = temp
 
     async def assume_available(self):
         """Reset unavalability tracker."""

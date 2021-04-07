@@ -1,26 +1,15 @@
 """The sia hub."""
-import asyncio
-from datetime import timedelta
-from typing import Tuple
 import logging
 
-from pysiaalarm.aio import SIAAccount, SIAClient, SIAEvent
-
-from homeassistant.core import Event, EventOrigin, HomeAssistant
 from homeassistant.const import CONF_PORT, EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import Event, EventOrigin, HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from pysiaalarm.aio import SIAAccount, SIAClient, SIAEvent
 
 from .const import (
     CONF_ACCOUNT,
     CONF_ACCOUNTS,
     CONF_ENCRYPTION_KEY,
-    EVENT_CODE,
-    EVENT_ACCOUNT,
-    EVENT_ZONE,
-    EVENT_PORT,
-    EVENT_MESSAGE,
-    EVENT_ID,
-    EVENT_TIMESTAMP,
     DOMAIN,
     SIA_EVENT,
 )
@@ -54,6 +43,7 @@ class SIAHub:
 
     async def async_setup_hub(self):
         """Add a device to the device_registry, register shutdown listener, load reactions."""
+        _LOGGER.debug("Setting up SIA Hub.")
         device_registry = await dr.async_get_registry(self._hass)
         port = self._port
         for acc in self._accounts:
@@ -75,16 +65,13 @@ class SIAHub:
 
     async def async_create_and_fire_event(self, event: SIAEvent):
         """Create a event on HA's bus, with the data from the SIAEvent."""
+        # Get rid of account, because it might contain encryption key.
+        event.sia_account = None
+        # Change the message_type to value because otherwise it is not JSON serializable.
+        event.message_type = event.message_type.value
+        # Fire event!
         self._hass.bus.async_fire(
             event_type=f"{SIA_EVENT}_{self._port}_{event.account}",
-            event_data={
-                EVENT_PORT: self._port,
-                EVENT_ACCOUNT: event.account,
-                EVENT_ZONE: event.ri,
-                EVENT_CODE: event.code,
-                EVENT_MESSAGE: event.message,
-                EVENT_ID: event.id,
-                EVENT_TIMESTAMP: event.timestamp,
-            },
+            event_data=event.to_dict(),
             origin=EventOrigin.remote,
         )

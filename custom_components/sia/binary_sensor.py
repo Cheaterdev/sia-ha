@@ -4,39 +4,41 @@ import logging
 from typing import Callable
 
 from homeassistant.components.binary_sensor import (
-    ENTITY_ID_FORMAT as BINARY_SENSOR_FORMAT,
-    BinarySensorEntity,
     DEVICE_CLASS_MOISTURE,
     DEVICE_CLASS_POWER,
     DEVICE_CLASS_SMOKE,
 )
+from homeassistant.components.binary_sensor import (
+    ENTITY_ID_FORMAT as BINARY_SENSOR_FORMAT,
+)
+from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PORT, CONF_ZONE, STATE_OFF, STATE_ON, STATE_UNKNOWN
-from homeassistant.core import HomeAssistant, callback, Event
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util.dt import utcnow
+from pysiaalarm import SIAEvent
 
 from .const import (
-    ATTR_LAST_CODE,
-    ATTR_LAST_MESSAGE,
-    ATTR_LAST_TIMESTAMP,
     CONF_ACCOUNT,
     CONF_ACCOUNTS,
     CONF_PING_INTERVAL,
     CONF_ZONES,
     DATA_UPDATED,
+    DOMAIN,
+    EVENT_ACCOUNT,
     EVENT_CODE,
+    EVENT_ID,
     EVENT_ZONE,
     EVENT_MESSAGE,
     EVENT_TIMESTAMP,
     HUB_ZONE,
-    SIA_EVENT,
-    DOMAIN,
     PING_INTERVAL_MARGIN,
+    SIA_EVENT,
 )
-from .helpers import GET_ENTITY_AND_NAME, GET_PING_INTERVAL
+from .helpers import GET_ENTITY_AND_NAME, GET_PING_INTERVAL, SIA_EVENT_TO_ATTR
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,7 +61,7 @@ CODE_CONSEQUENCES = {
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_devices: Callable[[], None]
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: Callable[[], None]
 ) -> bool:
     """Set up sia_binary_sensor from a config entry."""
 
@@ -96,7 +98,7 @@ async def async_setup_entry(
             for acc in entry.data[CONF_ACCOUNTS]
         ]
     )
-    async_add_devices(devices)
+    async_add_entities(devices)
     return True
 
 
@@ -125,7 +127,6 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
         self._event_listener_str = f"{SIA_EVENT}_{port}_{account}"
         self._unsub = None
 
-        self._should_poll = False
         self._is_on = None
         self._is_available = True
         self._remove_unavailability_tracker = None
@@ -133,9 +134,12 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
             CONF_ACCOUNT: self._account,
             CONF_PING_INTERVAL: self.ping_interval,
             CONF_ZONE: self._zone,
-            ATTR_LAST_MESSAGE: None,
-            ATTR_LAST_CODE: None,
-            ATTR_LAST_TIMESTAMP: None,
+            EVENT_ACCOUNT: None,
+            EVENT_CODE: None,
+            EVENT_ID: None,
+            EVENT_ZONE: None,
+            EVENT_MESSAGE: None,
+            EVENT_TIMESTAMP: None,
         }
 
     async def async_added_to_hass(self):
@@ -148,26 +152,19 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
             elif state.state == STATE_OFF:
                 self._is_on = False
         await self._async_track_unavailable()
-        async_dispatcher_connect(
-            self.hass, DATA_UPDATED, self._schedule_immediate_update
-        )
+        async_dispatcher_connect(self.hass, DATA_UPDATED, self.async_write_ha_state)
         self._unsub = self.hass.bus.async_listen(
             self._event_listener_str, self.async_handle_event
         )
-        self.async_on_remove(self._sia_on_remove)
+        self.async_on_remove(self._async_sia_on_remove)
 
     @callback
-    def _sia_on_remove(self):
+    def _async_sia_on_remove(self):
         """Remove the unavailability and event listener."""
         if self._unsub:
             self._unsub()
         if self._remove_unavailability_tracker:
             self._remove_unavailability_tracker()
-
-    @callback
-    def _schedule_immediate_update(self):
-        """Schedule update."""
-        self.async_schedule_update_ha_state(True)
 
     async def async_handle_event(self, event: Event):
         """Listen to events for this port and account and update states.
@@ -175,23 +172,16 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
         If the port and account combo receives any message it means it is online and can therefore be set to available.
         """
         await self.assume_available()
-        if (
-            int(event.data[EVENT_ZONE]) == self._zone
-            or self._device_class == DEVICE_CLASS_POWER
-        ):
+        sia_event = SIAEvent.from_dict(event.data)
+        sia_event.message_type = sia_event.message_type.value
+        if int(sia_event.ri) == self._zone or self._device_class == DEVICE_CLASS_POWER:
             device_class, new_state = CODE_CONSEQUENCES.get(
-                event.data[EVENT_CODE], (None, None)
+                sia_event.code, (None, None)
             )
             if new_state is not None and device_class == self._device_class:
-                self._attr.update(
-                    {
-                        ATTR_LAST_MESSAGE: event.data[EVENT_MESSAGE],
-                        ATTR_LAST_CODE: event.data[EVENT_CODE],
-                        ATTR_LAST_TIMESTAMP: event.data[EVENT_TIMESTAMP],
-                    }
-                )
+                self._attr.update(SIA_EVENT_TO_ATTR(sia_event))
                 self.state = new_state
-                if not self.registry_entry.disabled:
+                if self.enabled:
                     self.async_schedule_update_ha_state()
 
     @property
