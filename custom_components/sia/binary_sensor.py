@@ -38,7 +38,7 @@ from .const import (
     PING_INTERVAL_MARGIN,
     SIA_EVENT,
 )
-from .helpers import GET_ENTITY_AND_NAME, GET_PING_INTERVAL, SIA_EVENT_TO_ATTR
+from .utils import get_entity_and_name, get_ping_interval, sia_event_to_attr
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ async def async_setup_entry(
 
     devices = [
         SIABinarySensor(
-            *GET_ENTITY_AND_NAME(
+            *get_entity_and_name(
                 entry.data[CONF_PORT], acc[CONF_ACCOUNT], zone, device_class
             ),
             entry.data[CONF_PORT],
@@ -83,7 +83,7 @@ async def async_setup_entry(
     devices.extend(
         [
             SIABinarySensor(
-                *GET_ENTITY_AND_NAME(
+                *get_entity_and_name(
                     entry.data[CONF_PORT],
                     acc[CONF_ACCOUNT],
                     HUB_ZONE,
@@ -123,7 +123,7 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
         self._port = port
         self._account = account
         self._zone = zone
-        self._ping_interval = GET_PING_INTERVAL(ping_interval)
+        self._ping_interval = get_ping_interval(ping_interval)
         self._event_listener_str = f"{SIA_EVENT}_{port}_{account}"
         self._unsub = None
 
@@ -151,8 +151,15 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
                 self._is_on = True
             elif state.state == STATE_OFF:
                 self._is_on = False
-        await self._async_track_unavailable()
         async_dispatcher_connect(self.hass, DATA_UPDATED, self.async_write_ha_state)
+        self._unsub = self.hass.bus.async_listen(
+            self._event_listener_str, self.async_handle_event
+        )
+        self.setup_sia_entity()
+
+    def setup_sia_entity(self):
+        """Run the setup of the alarm control panel."""
+        self.assume_available()
         self._unsub = self.hass.bus.async_listen(
             self._event_listener_str, self.async_handle_event
         )
@@ -171,7 +178,7 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
 
         If the port and account combo receives any message it means it is online and can therefore be set to available.
         """
-        await self.assume_available()
+        self.assume_available()
         sia_event = SIAEvent.from_dict(event.data)
         sia_event.message_type = sia_event.message_type.value
         if int(sia_event.ri) == self._zone or self._device_class == DEVICE_CLASS_POWER:
@@ -179,7 +186,7 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
                 sia_event.code, (None, None)
             )
             if new_state is not None and device_class == self._device_class:
-                self._attr.update(SIA_EVENT_TO_ATTR(sia_event))
+                self._attr.update(sia_event_to_attr(sia_event))
                 self.state = new_state
                 if self.enabled:
                     self.async_schedule_update_ha_state()
@@ -241,13 +248,13 @@ class SIABinarySensor(BinarySensorEntity, RestoreEntity):
         """Set state."""
         self._is_on = new_on
 
-    async def assume_available(self):
+    def assume_available(self):
         """Reset unavalability tracker."""
         if not self.registry_entry.disabled:
-            await self._async_track_unavailable()
+            self._async_track_unavailable()
 
     @callback
-    async def _async_track_unavailable(self) -> bool:
+    def _async_track_unavailable(self) -> bool:
         """Track availability."""
         if self._remove_unavailability_tracker:
             self._remove_unavailability_tracker()

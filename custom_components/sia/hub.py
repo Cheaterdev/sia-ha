@@ -65,13 +65,8 @@ class SIAHub:
 
     async def async_create_and_fire_event(self, event: SIAEvent):
         """Create a event on HA's bus, with the data from the SIAEvent."""
-        # Get rid of account, because it might contain encryption key.
-        event.sia_account = None
-        # Change the message_type to value because otherwise it is not JSON serializable.
-        event.message_type = event.message_type.value
-        # Fire event!
         self._hass.bus.async_fire(
             event_type=f"{SIA_EVENT}_{self._port}_{event.account}",
-            event_data=event.to_dict(),
+            event_data=event.to_dict(encode_json=True),
             origin=EventOrigin.remote,
         )

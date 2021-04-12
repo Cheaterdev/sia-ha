@@ -16,7 +16,7 @@ from .const import (
 )
 
 
-def GET_ENTITY_AND_NAME(
+def get_entity_and_name(
     port: int, account: str, zone: int = 0, entity_type: str = None
 ) -> Tuple[str, str]:
     """Give back a entity_id and name according to the variables."""
@@ -25,23 +25,23 @@ def GET_ENTITY_AND_NAME(
             "Last Heartbeat" if entity_type == DEVICE_CLASS_TIMESTAMP else "Power"
         )
         return (
-            GET_ENTITY_ID(port, account, zone, entity_type),
+            get_entity_id(port, account, zone, entity_type),
             f"{port} - {account} - {entity_type_name}",
         )
     if entity_type:
         return (
-            GET_ENTITY_ID(port, account, zone, entity_type),
+            get_entity_id(port, account, zone, entity_type),
             f"{port} - {account} - zone {zone} - {entity_type}",
         )
     return None
 
 
-def GET_PING_INTERVAL(ping: int) -> timedelta:
+def get_ping_interval(ping: int) -> timedelta:
     """Return the ping interval as timedelta."""
     return timedelta(minutes=ping)
 
 
-def GET_ENTITY_ID(
+def get_entity_id(
     port: int, account: str, zone: int = 0, entity_type: str = None
 ) -> str:
     """Give back a entity_id according to the variables, defaults to the hub sensor entity_id."""
@@ -54,15 +54,13 @@ def GET_ENTITY_ID(
     return None
 
 
-def SIA_EVENT_TO_ATTR(event: SIAEvent) -> dict:
+def sia_event_to_attr(event: SIAEvent) -> dict:
     """Create the attributes dict from a SIAEvent."""
-    return (
-        {
-            EVENT_ACCOUNT: event.account,
-            EVENT_ZONE: event.ri,
-            EVENT_CODE: event.code,
-            EVENT_MESSAGE: event.message,
-            EVENT_ID: event.id,
-            EVENT_TIMESTAMP: event.timestamp,
-        }
-    )
+    return {
+        EVENT_ACCOUNT: event.account,
+        EVENT_ZONE: event.ri,
+        EVENT_CODE: event.code,
+        EVENT_MESSAGE: event.message,
+        EVENT_ID: event.id,
+        EVENT_TIMESTAMP: event.timestamp,
+    }
