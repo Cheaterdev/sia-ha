@@ -4,10 +4,10 @@
   "config_flow": true,
   "documentation": "https://www.home-assistant.io/integrations/sia",
   "requirements": [
-    "pysiaalarm==3.0.0b4"
+    "pysiaalarm==3.0.0b5"
   ],
   "codeowners": [
     "@eavanvalkenburg"
   ],
-  "version": "0.5.0b3"
+  "version": "0.5.0b4"
 }
