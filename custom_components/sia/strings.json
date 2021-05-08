@@ -4,15 +4,27 @@
     "step": {
       "user": {
         "data": {
-          "name": "Name",
-          "port": "Port",
-          "account": "Account",
+          "port": "[%key:common::config_flow::data::port%]",
+          "protocol": "Protocol",
+          "account": "Account ID",
           "encryption_key": "Encryption Key",
           "ping_interval": "Ping Interval (min)",
           "zones": "Number of zones for the account",
-          "additional_account": "Add more accounts?"
+          "ignore_timestamps": "Ignore the timestamp check",
+          "additional_account": "Additional accounts"
         },
-        "title": "Create a connection for SIA DC-09 based alarm systems."
+        "title": "Create a connection for SIA based alarm systems."
+      },
+      "additional_account": {
+        "data": {
+          "account": "[%key:component::sia::config::step::user::data::account%]",
+          "encryption_key": "[%key:component::sia::config::step::user::data::encryption_key%]",
+          "ping_interval": "[%key:component::sia::config::step::user::data::ping_interval%]",
+          "zones": "[%key:component::sia::config::step::user::data::zones%]",
+          "ignore_timestamps": "[%key:component::sia::config::step::user::data::ignore_timestamps%]",
+          "additional_account": "[%key:component::sia::config::step::user::data::additional_account%]"
+        },
+        "title": "Add another account to the current port."
       }
     },
     "error": {
@@ -22,10 +34,10 @@
       "invalid_account_length": "The account is not the right length, it has to be between 3 and 16 characters.",
       "invalid_ping": "The ping interval needs to be between 1 and 1440 minutes.",
       "invalid_zones": "There needs to be at least 1 zone.",
-      "unknown": "Unexpected error"
+      "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
-      "already_configured": "This SIA Port is already used, please select another or recreate the existing with an extra account."
+      "already_configured": "[%key:common::config_flow::abort::already_configured_service%]"
     }
   }
 }
