@@ -23,3 +23,7 @@ EVENT_ZONE = "zone"
 EVENT_MESSAGE = "last_message"
 EVENT_ID = "last_id"
 EVENT_TIMESTAMP = "last_timestamp"
+
+
+DEFAULT_TIMEBAND = (80, 40)
+IGNORED_TIMEBAND = (3600, 1800)

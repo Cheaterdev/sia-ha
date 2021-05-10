@@ -1,20 +1,22 @@
 """The sia hub."""
 import logging
 
-from homeassistant.const import CONF_PORT, EVENT_HOMEASSISTANT_STOP
+from homeassistant.const import CONF_PORT, CONF_PROTOCOL, EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Event, EventOrigin, HomeAssistant
 from homeassistant.helpers import device_registry as dr
-from pysiaalarm.aio import SIAAccount, SIAClient, SIAEvent
+from pysiaalarm.aio import SIAAccount, SIAClient, SIAEvent, CommunicationsProtocol
 
 from .const import (
     CONF_ACCOUNT,
     CONF_ACCOUNTS,
     CONF_ENCRYPTION_KEY,
+    CONF_IGNORE_TIMESTAMPS,
     DOMAIN,
     SIA_EVENT,
+    IGNORED_TIMEBAND,
+    DEFAULT_TIMEBAND,
 )
 
-ALLOWED_TIMEBAND = (300, 150)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,14 +33,19 @@ class SIAHub:
         self.entry_id = entry_id
         self._title = title
         self._accounts = hub_config[CONF_ACCOUNTS]
+        self._protocol = hub_config[CONF_PROTOCOL]
 
         self._remove_shutdown_listener = None
         self.sia_accounts = [
-            SIAAccount(a[CONF_ACCOUNT], a.get(CONF_ENCRYPTION_KEY), ALLOWED_TIMEBAND)
+            SIAAccount(
+                a[CONF_ACCOUNT],
+                a.get(CONF_ENCRYPTION_KEY),
+                IGNORED_TIMEBAND if a[CONF_IGNORE_TIMESTAMPS] else DEFAULT_TIMEBAND,
+            )
             for a in self._accounts
         ]
         self.sia_client = SIAClient(
-            "", self._port, self.sia_accounts, self.async_create_and_fire_event
+            "", self._port, self.sia_accounts, self.async_create_and_fire_event, CommunicationsProtocol(self._protocol)
         )
 
     async def async_setup_hub(self):

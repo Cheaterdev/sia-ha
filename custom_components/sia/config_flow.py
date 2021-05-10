@@ -131,7 +131,7 @@ class SIAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def update_data(self, user_input):
         """Parse the user_input and store in self.data."""
-        if not self._data:
+        if not self._data or user_input.get(CONF_PORT):
             self._data = {
                 CONF_PORT: user_input[CONF_PORT],
                 CONF_PROTOCOL: user_input[CONF_PROTOCOL],
