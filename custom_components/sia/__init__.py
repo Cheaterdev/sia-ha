@@ -12,7 +12,7 @@ from homeassistant.const import CONF_PORT, CONF_PROTOCOL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
-from .const import DOMAIN
+from .const import DOMAIN, CONF_IGNORE_TIMESTAMPS
 from .hub import SIAHub
 
 PLATFORMS = [ALARM_CONTROL_PANEL_DOMAIN, BINARY_SENSOR_DOMAIN, SENSOR_DOMAIN]
@@ -66,9 +66,10 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """Migrate old entry."""
     _LOGGER.debug("Migrating from version %s", config_entry.version)
 
-    if config_entry.version == 1:
+    if config_entry.version < 2:
         data = config_entry.data.copy()
         data[CONF_PROTOCOL] = "TCP"
+        data[CONF_IGNORE_TIMESTAMPS] = False
         config_entry.version = 2
         hass.config_entries.async_update_entry(config_entry, data=data)
 

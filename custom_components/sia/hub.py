@@ -40,12 +40,18 @@ class SIAHub:
             SIAAccount(
                 a[CONF_ACCOUNT],
                 a.get(CONF_ENCRYPTION_KEY),
-                IGNORED_TIMEBAND if a[CONF_IGNORE_TIMESTAMPS] else DEFAULT_TIMEBAND,
+                IGNORED_TIMEBAND
+                if a.get(CONF_IGNORE_TIMESTAMPS, False)
+                else DEFAULT_TIMEBAND,
             )
             for a in self._accounts
         ]
         self.sia_client = SIAClient(
-            "", self._port, self.sia_accounts, self.async_create_and_fire_event, CommunicationsProtocol(self._protocol)
+            "",
+            self._port,
+            self.sia_accounts,
+            self.async_create_and_fire_event,
+            CommunicationsProtocol(self._protocol),
         )
 
     async def async_setup_hub(self):
