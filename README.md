@@ -1,3 +1,13 @@
+## OFFICIAL INTEGRATION IS NOW IN HA!
+
+Make sure to delete the current integraiton, in your Integrations page, then delete the HACS custom component, reboot and then input your config in the official 
+integration config. There are some settings, most importantly ignoring timestamps, in a options flow (press configure after installing the integration).
+
+https://www.home-assistant.io/integrations/sia/
+
+## OFFICIAL INTEGRATION IS NOW IN HA!
+----------------
+
 # sia-ha
 SIA alarm systems integration into Home Assistant
 Based on https://github.com/bitblaster/alarmreceiver
