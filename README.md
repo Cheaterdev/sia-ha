@@ -1,8 +1,16 @@
-[![hacs][hacsbadge]](hacs)
+
+## OFFICIAL INTEGRATION IS NOW IN HA!
+
+Make sure to delete the current integraiton, in your Integrations page, then delete the HACS custom component, reboot and then input your config in the official 
+integration config. There are some settings, most importantly ignoring timestamps, in a options flow (press configure after installing the integration).
+
+
+## OFFICIAL INTEGRATION IS NOW IN HA!
+----------------
+
 
 _Component to integrate with [SIA], based on [CheaterDev's version][ch_sia]._
 
-_Latest beta will be suggested for inclusion as a official integration._
 
 **This component will set up the following platforms.**
 
