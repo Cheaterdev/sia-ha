@@ -3,12 +3,8 @@
   "name": "SIA Alarm Systems",
   "config_flow": true,
   "documentation": "https://www.home-assistant.io/integrations/sia",
-  "requirements": [
-    "pysiaalarm==3.0.0b12"
-  ],
-  "codeowners": [
-    "@eavanvalkenburg"
-  ],
-  "version": "0.5.0b9",
+  "requirements": ["pysiaalarm==3.0.3b1"],
+  "codeowners": ["@eavanvalkenburg"],
+  "version": "1.0.0",
   "iot_class": "local_push"
 }

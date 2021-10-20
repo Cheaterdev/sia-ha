@@ -2,7 +2,14 @@
 
 _Component to integrate with [SIA], based on [CheaterDev's version][ch_sia]._
 
-_Latest beta will be suggested for inclusion as a official integration._
+This is the new stream which will be kept in sync with the [official integration][official].
+
+In order to switch from an earlier version of the custom component to do this do not install this version over an existing version of the custom component, delete your integration in the integrations page, then update and reenter your config in the integrations page.
+
+If you are running the official integration, then you can install this one and things will work.
+
+The config used by earlier versions (before 1.0) is different and will cause errors, it is in sync with the official integration though!
+
 
 **This component will set up the following platforms.**
 
@@ -25,8 +32,8 @@ Platform | Description
 
 ## Hub Setup (Ajax Systems Hub example)
 
-1. Select "SIA Protocol". 
-2. Enable "Connect on demand". 
+1. Select "SIA Protocol".
+2. Enable "Connect on demand".
 3. Place Account Id - 3-16 ASCII hex characters. For example AAA.
 4. Insert Home Assistant IP address. It must be a visible to hub. There is no cloud connection to it.
 5. Insert Home Assistant listening port. This port must not be used with anything else.
@@ -64,7 +71,7 @@ To turn on debugging go into your `configuration.yaml` and add these lines:
 logger:
   default: error
   logs:
-    custom_components.sia: debug 
+    custom_components.sia: debug
     pysiaalarm: debug
 ```
 
@@ -72,3 +79,4 @@ logger:
 [ch_sia]: https://github.com/Cheaterdev/sia-ha
 [hacs]: https://github.com/custom-components/hacs
 [hacsbadge]: https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge
+[official]: https://www.home-assistant.io/integrations/sia/

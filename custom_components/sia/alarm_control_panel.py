@@ -1,59 +1,40 @@
 """Module for SIA Alarm Control Panels."""
+from __future__ import annotations
 
 import logging
-from typing import Callable
+from typing import Any
+
 from pysiaalarm import SIAEvent
 
-from homeassistant.components.alarm_control_panel import (
-    ENTITY_ID_FORMAT as ALARM_FORMAT,
-    AlarmControlPanelEntity,
-)
+from homeassistant.components.alarm_control_panel import AlarmControlPanelEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
-    CONF_PORT,
-    CONF_ZONE,
     STATE_ALARM_ARMED_AWAY,
     STATE_ALARM_ARMED_CUSTOM_BYPASS,
     STATE_ALARM_ARMED_NIGHT,
     STATE_ALARM_DISARMED,
     STATE_ALARM_TRIGGERED,
-    STATE_UNKNOWN,
+    STATE_UNAVAILABLE,
 )
-from homeassistant.core import callback, Event, HomeAssistant
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.event import async_track_point_in_utc_time
-from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.util.dt import utcnow
+from homeassistant.core import HomeAssistant, State
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.typing import StateType
 
-from .const import (
-    CONF_ACCOUNT,
-    CONF_ACCOUNTS,
-    CONF_PING_INTERVAL,
-    CONF_ZONES,
-    DATA_UPDATED,
-    EVENT_ACCOUNT,
-    EVENT_CODE,
-    EVENT_ID,
-    EVENT_ZONE,
-    EVENT_MESSAGE,
-    EVENT_TIMESTAMP,
-    SIA_EVENT,
-    DOMAIN,
-    PING_INTERVAL_MARGIN,
-)
-from .utils import get_entity_and_name, get_ping_interval, sia_event_to_attr
+from .const import CONF_ACCOUNT, CONF_ACCOUNTS, CONF_ZONES, SIA_UNIQUE_ID_FORMAT_ALARM
+from .sia_entity_base import SIABaseEntity
 
 _LOGGER = logging.getLogger(__name__)
 
 DEVICE_CLASS_ALARM = "alarm"
 PREVIOUS_STATE = "previous_state"
 
-CODE_CONSEQUENCES = {
-    "BA": STATE_ALARM_TRIGGERED,
+CODE_CONSEQUENCES: dict[str, StateType] = {
     "PA": STATE_ALARM_TRIGGERED,
     "JA": STATE_ALARM_TRIGGERED,
     "TA": STATE_ALARM_TRIGGERED,
+    "BA": STATE_ALARM_TRIGGERED,
     "CA": STATE_ALARM_ARMED_AWAY,
+    "CB": STATE_ALARM_ARMED_AWAY,
     "CG": STATE_ALARM_ARMED_AWAY,
     "CL": STATE_ALARM_ARMED_AWAY,
     "CP": STATE_ALARM_ARMED_AWAY,
@@ -61,6 +42,7 @@ CODE_CONSEQUENCES = {
     "CS": STATE_ALARM_ARMED_AWAY,
     "CF": STATE_ALARM_ARMED_CUSTOM_BYPASS,
     "OA": STATE_ALARM_DISARMED,
+    "OB": STATE_ALARM_DISARMED,
     "OG": STATE_ALARM_DISARMED,
     "OP": STATE_ALARM_DISARMED,
     "OQ": STATE_ALARM_DISARMED,
@@ -75,214 +57,56 @@ CODE_CONSEQUENCES = {
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: Callable[[], None]
-) -> bool:
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
     """Set up SIA alarm_control_panel(s) from a config entry."""
     async_add_entities(
-        [
-            SIAAlarmControlPanel(
-                *get_entity_and_name(
-                    entry.data[CONF_PORT], acc[CONF_ACCOUNT], zone, DEVICE_CLASS_ALARM
-                ),
-                entry.data[CONF_PORT],
-                acc[CONF_ACCOUNT],
-                zone,
-                acc[CONF_PING_INTERVAL],
-            )
-            for acc in entry.data[CONF_ACCOUNTS]
-            for zone in range(1, acc[CONF_ZONES] + 1)
-        ]
+        SIAAlarmControlPanel(entry, account_data, zone)
+        for account_data in entry.data[CONF_ACCOUNTS]
+        for zone in range(
+            1,
+            entry.options[CONF_ACCOUNTS][account_data[CONF_ACCOUNT]][CONF_ZONES] + 1,
+        )
     )
-    return True
 
 
-class SIAAlarmControlPanel(AlarmControlPanelEntity, RestoreEntity):
+class SIAAlarmControlPanel(SIABaseEntity, AlarmControlPanelEntity):
     """Class for SIA Alarm Control Panels."""
 
     def __init__(
         self,
-        entity_id: str,
-        name: str,
-        port: int,
-        account: str,
+        entry: ConfigEntry,
+        account_data: dict[str, Any],
         zone: int,
-        ping_interval: int,
-    ):
+    ) -> None:
         """Create SIAAlarmControlPanel object."""
-        self.entity_id = ALARM_FORMAT.format(entity_id)
-        self._unique_id = entity_id
-        self._name = name
-        self._port = port
-        self._account = account
-        self._zone = zone
-        self._ping_interval = get_ping_interval(ping_interval)
-        self._event_listener_str = f"{SIA_EVENT}_{port}_{account}"
-        self._unsub = None
+        super().__init__(entry, account_data, zone, DEVICE_CLASS_ALARM)
+        self._attr_state: StateType = None
+        self._old_state: StateType = None
 
-        self._is_available = True
-        self._remove_unavailability_tracker = None
-        self._state = None
-        self._old_state = None
-        self._attr = {
-            CONF_ACCOUNT: self._account,
-            CONF_PING_INTERVAL: self.ping_interval,
-            CONF_ZONE: self._zone,
-            EVENT_ACCOUNT: None,
-            EVENT_CODE: None,
-            EVENT_ID: None,
-            EVENT_ZONE: None,
-            EVENT_MESSAGE: None,
-            EVENT_TIMESTAMP: None,
-        }
-
-    async def async_added_to_hass(self):
-        """Once the panel is added, see if it was there before and pull in that state."""
-        await super().async_added_to_hass()
-        state = await self.async_get_last_state()
-        _LOGGER.debug(
-            "Loading last state: %s",
-            state.state if state is not None and state.state is not None else "None",
+        self._attr_unique_id = SIA_UNIQUE_ID_FORMAT_ALARM.format(
+            self._entry.entry_id, self._account, self._zone
         )
-        if (
-            state is not None
-            and state.state is not None
-            and state.state
-            in [
-                STATE_ALARM_ARMED_AWAY,
-                STATE_ALARM_ARMED_CUSTOM_BYPASS,
-                STATE_ALARM_ARMED_NIGHT,
-                STATE_ALARM_DISARMED,
-                STATE_ALARM_TRIGGERED,
-                STATE_UNKNOWN,
-            ]
-        ):
-            self.state = state.state
-        else:
-            self.state = None
-        async_dispatcher_connect(self.hass, DATA_UPDATED, self.async_write_ha_state)
-        self._unsub = self.hass.bus.async_listen(
-            self._event_listener_str, self.async_handle_event
-        )
-        self.setup_sia_alarm()
 
-    def setup_sia_alarm(self):
-        """Run the setup of the alarm control panel."""
-        self.assume_available()
-        self._unsub = self.hass.bus.async_listen(
-            self._event_listener_str, self.async_handle_event
-        )
-        self.async_on_remove(self._async_sia_on_remove)
+    def update_state(self, sia_event: SIAEvent) -> None:
+        """Update the state of the alarm control panel."""
+        new_state = CODE_CONSEQUENCES.get(sia_event.code, None)
+        if new_state is not None:
+            _LOGGER.debug("New state will be %s", new_state)
+            if new_state == PREVIOUS_STATE:
+                new_state = self._old_state
+            self._attr_state, self._old_state = new_state, self._attr_state
 
-    @callback
-    def _async_sia_on_remove(self):
-        """Remove the unavailability and event listener."""
-        if self._unsub:
-            self._unsub()
-        if self._remove_unavailability_tracker:
-            self._remove_unavailability_tracker()
-
-    async def async_handle_event(self, event: Event):
-        """Listen to events for this port and account and update states.
-
-        If the port and account combo receives any message it means it is online and can therefore be set to available.
-        """
-        self.assume_available()
-        sia_event = SIAEvent.from_dict(event.data)
-        if int(sia_event.ri) != self._zone:
-            return
-        new_state = CODE_CONSEQUENCES.get(sia_event.code)
-        if not new_state:
-            return
-        self._attr.update(sia_event_to_attr(sia_event))
-        self.state = new_state
-        if self.enabled:
-            self.async_schedule_update_ha_state()
-
-    @property
-    def name(self) -> str:
-        """Get Name."""
-        return self._name
-
-    @property
-    def ping_interval(self) -> int:
-        """Get ping_interval."""
-        return str(self._ping_interval)
-
-    @property
-    def state(self) -> str:
-        """Get state."""
-        return self._state
-
-    @state.setter
-    def state(self, state: str):
-        """Set state."""
-        temp = self._old_state if state == PREVIOUS_STATE else state
-        self._old_state = self._state
-        self._state = temp
-
-    @property
-    def account(self) -> str:
-        """Return device account."""
-        return self._account
-
-    @property
-    def unique_id(self) -> str:
-        """Get unique_id."""
-        return self._unique_id
-
-    @property
-    def available(self) -> bool:
-        """Get availability."""
-        return self._is_available
-
-    @property
-    def device_state_attributes(self) -> dict:
-        """Return device attributes."""
-        return self._attr
-
-    @property
-    def should_poll(self) -> bool:
-        """Return False if entity pushes its state to HA."""
-        return False
-
-    def assume_available(self):
-        """Reset unavalability tracker."""
-        if not self.registry_entry.disabled:
-            self._async_track_unavailable()
-
-    @callback
-    def _async_track_unavailable(self) -> bool:
-        """Reset unavailability."""
-        if self._remove_unavailability_tracker:
-            self._remove_unavailability_tracker()
-        self._remove_unavailability_tracker = async_track_point_in_utc_time(
-            self.hass,
-            self._async_set_unavailable,
-            utcnow() + self._ping_interval + PING_INTERVAL_MARGIN,
-        )
-        if not self._is_available:
-            self._is_available = True
-            self.async_schedule_update_ha_state()
-            return True
-        return False
-
-    @callback
-    def _async_set_unavailable(self, _):
-        """Set availability."""
-        self._remove_unavailability_tracker = None
-        self._is_available = False
-        self.async_schedule_update_ha_state()
+    def handle_last_state(self, last_state: State | None) -> None:
+        """Handle the last state."""
+        if last_state is not None:
+            self._attr_state = last_state.state
+        if self.state == STATE_UNAVAILABLE:
+            self._attr_available = False
 
     @property
     def supported_features(self) -> int:
         """Return the list of supported features."""
-        return None
-
-    @property
-    def device_info(self) -> dict:
-        """Return the device_info."""
-        return {
-            "identifiers": {(DOMAIN, self.unique_id)},
-            "name": self.name,
-            "via_device": (DOMAIN, self._port, self._account),
-        }
+        return 0

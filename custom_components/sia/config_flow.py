@@ -1,5 +1,10 @@
 """Config flow for sia integration."""
+from __future__ import annotations
+
+from collections.abc import Mapping
+from copy import deepcopy
 import logging
+from typing import Any
 
 from pysiaalarm import (
     InvalidAccountFormatError,
@@ -10,9 +15,10 @@ from pysiaalarm import (
 )
 import voluptuous as vol
 
-from homeassistant import config_entries, exceptions
+from homeassistant import config_entries
 from homeassistant.const import CONF_PORT, CONF_PROTOCOL
-from homeassistant.data_entry_flow import AbortFlow
+from homeassistant.core import callback
+from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
     CONF_ACCOUNT,
@@ -23,7 +29,9 @@ from .const import (
     CONF_PING_INTERVAL,
     CONF_ZONES,
     DOMAIN,
+    TITLE,
 )
+from .hub import SIAHub
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,7 +44,6 @@ HUB_SCHEMA = vol.Schema(
         vol.Optional(CONF_ENCRYPTION_KEY): str,
         vol.Required(CONF_PING_INTERVAL, default=1): int,
         vol.Required(CONF_ZONES, default=1): int,
-        vol.Required(CONF_IGNORE_TIMESTAMPS, default=False): bool,
         vol.Optional(CONF_ADDITIONAL_ACCOUNTS, default=False): bool,
     }
 )
@@ -47,113 +54,176 @@ ACCOUNT_SCHEMA = vol.Schema(
         vol.Optional(CONF_ENCRYPTION_KEY): str,
         vol.Required(CONF_PING_INTERVAL, default=1): int,
         vol.Required(CONF_ZONES, default=1): int,
-        vol.Required(CONF_IGNORE_TIMESTAMPS, default=False): bool,
         vol.Optional(CONF_ADDITIONAL_ACCOUNTS, default=False): bool,
     }
 )
 
+DEFAULT_OPTIONS = {CONF_IGNORE_TIMESTAMPS: False, CONF_ZONES: None}
 
-def validate_input(data: dict):
+
+def validate_input(data: dict[str, Any]) -> dict[str, str] | None:
     """Validate the input by the user."""
-    SIAAccount.validate_account(data[CONF_ACCOUNT], data.get(CONF_ENCRYPTION_KEY))
+    try:
+        SIAAccount.validate_account(data[CONF_ACCOUNT], data.get(CONF_ENCRYPTION_KEY))
+    except InvalidKeyFormatError:
+        return {"base": "invalid_key_format"}
+    except InvalidKeyLengthError:
+        return {"base": "invalid_key_length"}
+    except InvalidAccountFormatError:
+        return {"base": "invalid_account_format"}
+    except InvalidAccountLengthError:
+        return {"base": "invalid_account_length"}
+    except Exception as exc:  # pylint: disable=broad-except
+        _LOGGER.exception("Unexpected exception from SIAAccount: %s", exc)
+        return {"base": "unknown"}
+    if not 1 <= data[CONF_PING_INTERVAL] <= 1440:
+        return {"base": "invalid_ping"}
+    return validate_zones(data)
 
-    try:
-        ping = int(data[CONF_PING_INTERVAL])
-        assert 1 <= ping <= 1440
-    except AssertionError as invalid_ping:
-        raise InvalidPing from invalid_ping
-    try:
-        zones = int(data[CONF_ZONES])
-        assert zones > 0
-    except AssertionError as invalid_zone:
-        raise InvalidZones from invalid_zone
+
+def validate_zones(data: dict[str, Any]) -> dict[str, str] | None:
+    """Validate the zones field."""
+    if data[CONF_ZONES] == 0:
+        return {"base": "invalid_zones"}
+    return None
 
 
 class SIAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for sia."""
 
-    VERSION = 2
+    VERSION: int = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Get the options flow for this handler."""
+        return SIAOptionsFlowHandler(config_entry)
 
     def __init__(self):
         """Initialize the config flow."""
-        self._data = {}
+        self._data: dict[str, Any] = {}
+        self._options: Mapping[str, Any] = {CONF_ACCOUNTS: {}}
 
-    async def async_step_add_account(self, user_input: dict = None):
-        """Handle the additional accounts steps."""
-        if user_input is None:
-            return self.async_show_form(
-                step_id="user",
-                data_schema=ACCOUNT_SCHEMA,
-                errors={},
-            )
-
-    async def async_step_user(self, user_input: dict = None):
-        """Handle the initial step."""
-        if user_input is None:
-            return self.async_show_form(
-                step_id="user", data_schema=HUB_SCHEMA, errors={}
-            )
-        errors = {}
-        try:
-            validate_input(user_input)
-        except InvalidKeyFormatError:
-            errors["base"] = "invalid_key_format"
-        except InvalidKeyLengthError:
-            errors["base"] = "invalid_key_length"
-        except InvalidAccountFormatError:
-            errors["base"] = "invalid_account_format"
-        except InvalidAccountLengthError:
-            errors["base"] = "invalid_account_length"
-        except InvalidPing:
-            errors["base"] = "invalid_ping"
-        except InvalidZones:
-            errors["base"] = "invalid_zones"
-        except Exception:  # pylint: disable=broad-except
-            _LOGGER.exception("Unexpected exception")
-            errors["base"] = "unknown"
-        if errors:
+    async def async_step_user(self, user_input: dict[str, Any] = None) -> FlowResult:
+        """Handle the initial user step."""
+        errors: dict[str, str] | None = None
+        if user_input is not None:
+            errors = validate_input(user_input)
+        if user_input is None or errors is not None:
             return self.async_show_form(
                 step_id="user", data_schema=HUB_SCHEMA, errors=errors
             )
-        self.update_data(user_input)
-        await self.async_set_unique_id(f"{DOMAIN}_{self._data[CONF_PORT]}")
-        try:
-            self._abort_if_unique_id_configured()
-        except AbortFlow:
-            return self.async_abort(reason="already_configured")
+        return await self.async_handle_data_and_route(user_input)
+
+    async def async_step_add_account(
+        self, user_input: dict[str, Any] = None
+    ) -> FlowResult:
+        """Handle the additional accounts steps."""
+        errors: dict[str, str] | None = None
+        if user_input is not None:
+            errors = validate_input(user_input)
+        if user_input is None or errors is not None:
+            return self.async_show_form(
+                step_id="add_account", data_schema=ACCOUNT_SCHEMA, errors=errors
+            )
+        return await self.async_handle_data_and_route(user_input)
+
+    async def async_handle_data_and_route(
+        self, user_input: dict[str, Any]
+    ) -> FlowResult:
+        """Handle the user_input, check if configured and route to the right next step or create entry."""
+        self._update_data(user_input)
+
+        self._async_abort_entries_match({CONF_PORT: self._data[CONF_PORT]})
 
         if user_input[CONF_ADDITIONAL_ACCOUNTS]:
             return await self.async_step_add_account()
         return self.async_create_entry(
-            title=f"SIA Alarm on port {self._data[CONF_PORT]}",
+            title=TITLE.format(self._data[CONF_PORT]),
             data=self._data,
+            options=self._options,
         )
 
-    def update_data(self, user_input):
-        """Parse the user_input and store in self.data."""
+    def _update_data(self, user_input: dict[str, Any]) -> None:
+        """Parse the user_input and store in data and options attributes.
+
+        If there is a port in the input or no data, assume it is fully new and overwrite.
+        Add the default options and overwrite the zones in options.
+        """
         if not self._data or user_input.get(CONF_PORT):
             self._data = {
                 CONF_PORT: user_input[CONF_PORT],
                 CONF_PROTOCOL: user_input[CONF_PROTOCOL],
-                CONF_ACCOUNTS: [
-                    {
-                        CONF_ACCOUNT: user_input[CONF_ACCOUNT],
-                        CONF_ENCRYPTION_KEY: user_input.get(CONF_ENCRYPTION_KEY),
-                        CONF_PING_INTERVAL: user_input[CONF_PING_INTERVAL],
-                        CONF_ZONES: user_input[CONF_ZONES],
-                        CONF_IGNORE_TIMESTAMPS: user_input[CONF_IGNORE_TIMESTAMPS],
-                    }
-                ],
+                CONF_ACCOUNTS: [],
             }
-        else:
-            add_data = user_input.copy()
-            add_data.pop(CONF_ADDITIONAL_ACCOUNTS)
-            self._data[CONF_ACCOUNTS].append(add_data)
+        account = user_input[CONF_ACCOUNT]
+        self._data[CONF_ACCOUNTS].append(
+            {
+                CONF_ACCOUNT: account,
+                CONF_ENCRYPTION_KEY: user_input.get(CONF_ENCRYPTION_KEY),
+                CONF_PING_INTERVAL: user_input[CONF_PING_INTERVAL],
+            }
+        )
+        self._options[CONF_ACCOUNTS].setdefault(account, deepcopy(DEFAULT_OPTIONS))
+        self._options[CONF_ACCOUNTS][account][CONF_ZONES] = user_input[CONF_ZONES]
 
 
-class InvalidPing(exceptions.HomeAssistantError):
-    """Error to indicate there is invalid ping interval."""
+class SIAOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle SIA options."""
 
+    def __init__(self, config_entry):
+        """Initialize SIA options flow."""
+        self.config_entry = config_entry
+        self.options = deepcopy(dict(config_entry.options))
+        self.hub: SIAHub | None = None
+        self.accounts_todo: list = []
 
-class InvalidZones(exceptions.HomeAssistantError):
-    """Error to indicate there is invalid number of zones."""
+    async def async_step_init(self, user_input: dict[str, Any] = None) -> FlowResult:
+        """Manage the SIA options."""
+        self.hub = self.hass.data[DOMAIN][self.config_entry.entry_id]
+        assert self.hub is not None
+        assert self.hub.sia_accounts is not None
+        self.accounts_todo = [a.account_id for a in self.hub.sia_accounts]
+        return await self.async_step_options()
+
+    async def async_step_options(self, user_input: dict[str, Any] = None) -> FlowResult:
+        """Create the options step for a account."""
+        errors: dict[str, str] | None = None
+        if user_input is not None:
+            errors = validate_zones(user_input)
+        if user_input is None or errors is not None:
+            account = self.accounts_todo[0]
+            return self.async_show_form(
+                step_id="options",
+                description_placeholders={"account": account},
+                data_schema=vol.Schema(
+                    {
+                        vol.Optional(
+                            CONF_ZONES,
+                            default=self.options[CONF_ACCOUNTS][account][CONF_ZONES],
+                        ): int,
+                        vol.Optional(
+                            CONF_IGNORE_TIMESTAMPS,
+                            default=self.options[CONF_ACCOUNTS][account][
+                                CONF_IGNORE_TIMESTAMPS
+                            ],
+                        ): bool,
+                    }
+                ),
+                errors=errors,
+                last_step=self.last_step,
+            )
+
+        account = self.accounts_todo.pop(0)
+        self.options[CONF_ACCOUNTS][account][CONF_IGNORE_TIMESTAMPS] = user_input[
+            CONF_IGNORE_TIMESTAMPS
+        ]
+        self.options[CONF_ACCOUNTS][account][CONF_ZONES] = user_input[CONF_ZONES]
+        if self.accounts_todo:
+            return await self.async_step_options()
+        return self.async_create_entry(title="", data=self.options)
+
+    @property
+    def last_step(self) -> bool:
+        """Return if this is the last step."""
+        return len(self.accounts_todo) <= 1
