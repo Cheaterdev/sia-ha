@@ -11,6 +11,14 @@ integration config. There are some settings, most importantly ignoring timestamp
 
 _Component to integrate with [SIA], based on [CheaterDev's version][ch_sia]._
 
+This is the new stream which will be kept in sync with the [official integration][official].
+
+In order to switch from an earlier version of the custom component to do this do not install this version over an existing version of the custom component, delete your integration in the integrations page, then update and reenter your config in the integrations page.
+
+If you are running the official integration, then you can install this one and things will work.
+
+The config used by earlier versions (before 1.0) is different and will cause errors, it is in sync with the official integration though!
+
 
 **This component will set up the following platforms.**
 
@@ -20,7 +28,7 @@ This integration was tested with Ajax Systems security hub only. Other SIA hubs 
 
 Platform | Description
 -- | --
-`binary_sensor` | A smoke and moisture sensor, one of each per account and zone. You can disable these sensors if you do not have those devices.
+`binary_sensor` | A smoke and moisture sensor, one of each per account and zone. Power sensor for the hub. You can disable these sensors if you do not have those devices.
 `alarm_control_panel` | Alarm panel with the state of the alarm, one per account and zone. You can disable this sensor if you have zones defined with just sensors and no alarm.
 `sensor` | Sensor with the last heartbeat message from your system, one  per account. Please do not disable this sensor as it will show you the status of the connection.
 
@@ -28,6 +36,7 @@ Platform | Description
 - Alarm tracking with a alarm_control_panel component, but no alarm setting
 - Fire/gas tracker
 - Water leak tracker
+- Hub Power status tracker
 - AES-128 CBC encryption support
 
 ## Hub Setup (Ajax Systems Hub example)
@@ -72,7 +81,7 @@ To turn on debugging go into your `configuration.yaml` and add these lines:
 logger:
   default: error
   logs:
-    custom_components.sia: debug 
+    custom_components.sia: debug
     pysiaalarm: debug
 ```
 
@@ -80,3 +89,4 @@ logger:
 [ch_sia]: https://github.com/Cheaterdev/sia-ha
 [hacs]: https://github.com/custom-components/hacs
 [hacsbadge]: https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge
+[official]: https://www.home-assistant.io/integrations/sia/

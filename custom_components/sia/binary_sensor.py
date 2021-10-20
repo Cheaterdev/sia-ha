@@ -1,192 +1,163 @@
 """Module for SIA Binary Sensors."""
+from __future__ import annotations
 
+from collections.abc import Iterable
 import logging
-from typing import Callable
+from typing import Any
+
+from pysiaalarm import SIAEvent
 
 from homeassistant.components.binary_sensor import (
-    ENTITY_ID_FORMAT as BINARY_SENSOR_FORMAT,
+    DEVICE_CLASS_MOISTURE,
+    DEVICE_CLASS_POWER,
+    DEVICE_CLASS_SMOKE,
     BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ZONE, STATE_OFF, STATE_ON, STATE_UNKNOWN
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.event import async_track_point_in_utc_time
-from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.util.dt import utcnow
+from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
+from homeassistant.core import HomeAssistant, State
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     CONF_ACCOUNT,
-    CONF_PING_INTERVAL,
-    DATA_UPDATED,
-    DOMAIN,
-    PING_INTERVAL_MARGIN,
+    CONF_ACCOUNTS,
+    CONF_ZONES,
+    SIA_HUB_ZONE,
+    SIA_UNIQUE_ID_FORMAT_BINARY,
 )
+from .sia_entity_base import SIABaseEntity
 
 _LOGGER = logging.getLogger(__name__)
 
 
+POWER_CODE_CONSEQUENCES: dict[str, bool] = {
+    "AT": False,
+    "AR": True,
+}
+
+SMOKE_CODE_CONSEQUENCES: dict[str, bool] = {
+    "GA": True,
+    "GH": False,
+    "FA": True,
+    "FH": False,
+    "KA": True,
+    "KH": False,
+}
+
+MOISTURE_CODE_CONSEQUENCES: dict[str, bool] = {
+    "WA": True,
+    "WH": False,
+}
+
+
+def generate_binary_sensors(entry) -> Iterable[SIABinarySensorBase]:
+    """Generate binary sensors.
+
+    For each Account there is one power sensor with zone == 0.
+    For each Zone in each Account there is one smoke and one moisture sensor.
+    """
+    for account in entry.data[CONF_ACCOUNTS]:
+        yield SIABinarySensorPower(entry, account)
+        zones = entry.options[CONF_ACCOUNTS][account[CONF_ACCOUNT]][CONF_ZONES]
+        for zone in range(1, zones + 1):
+            yield SIABinarySensorSmoke(entry, account, zone)
+            yield SIABinarySensorMoisture(entry, account, zone)
+
+
 async def async_setup_entry(
-    hass, entry: ConfigEntry, async_add_devices: Callable[[], None]
-) -> bool:
-    """Set up sia_binary_sensor from a config entry."""
-    async_add_devices(
-        [
-            device
-            for device in hass.data[DOMAIN][entry.entry_id].states.values()
-            if isinstance(device, SIABinarySensor)
-        ]
-    )
-
-    return True
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up SIA binary sensors from a config entry."""
+    async_add_entities(generate_binary_sensors(entry))
 
 
-class SIABinarySensor(BinarySensorEntity, RestoreEntity):
+class SIABinarySensorBase(SIABaseEntity, BinarySensorEntity):
     """Class for SIA Binary Sensors."""
 
     def __init__(
         self,
-        entity_id: str,
-        name: str,
-        device_class: str,
-        port: int,
-        account: str,
+        entry: ConfigEntry,
+        account_data: dict[str, Any],
         zone: int,
-        ping_interval: int,
-    ):
-        """Create SIABinarySensor object."""
-        self.entity_id = BINARY_SENSOR_FORMAT.format(entity_id)
-        self._unique_id = entity_id
-        self._name = name
-        self._device_class = device_class
-        self._port = port
-        self._account = account
-        self._zone = zone
-        self._ping_interval = ping_interval
+        device_class: str,
+    ) -> None:
+        """Initialize a base binary sensor."""
+        super().__init__(entry, account_data, zone, device_class)
 
-        self._should_poll = False
-        self._is_on = None
-        self._is_available = True
-        self._remove_unavailability_tracker = None
-        self._attr = {
-            CONF_ACCOUNT: self._account,
-            CONF_PING_INTERVAL: str(self._ping_interval),
-            CONF_ZONE: self._zone,
-        }
-
-    async def async_added_to_hass(self):
-        """Add sensor to HASS."""
-        await super().async_added_to_hass()
-        state = await self.async_get_last_state()
-        if state is not None and state.state is not None:
-            if state.state == STATE_ON:
-                self._is_on = True
-            elif state.state == STATE_OFF:
-                self._is_on = False
-        await self._async_track_unavailable()
-        async_dispatcher_connect(
-            self.hass, DATA_UPDATED, self._schedule_immediate_update
+        self._attr_unique_id = SIA_UNIQUE_ID_FORMAT_BINARY.format(
+            self._entry.entry_id, self._account, self._zone, self._attr_device_class
         )
 
-    @callback
-    def _schedule_immediate_update(self):
-        """Schedule update."""
-        self.async_schedule_update_ha_state(True)
+    def handle_last_state(self, last_state: State | None) -> None:
+        """Handle the last state."""
+        if last_state is not None and last_state.state is not None:
+            if last_state.state == STATE_ON:
+                self._attr_is_on = True
+            elif last_state.state == STATE_OFF:
+                self._attr_is_on = False
+            elif last_state.state == STATE_UNAVAILABLE:
+                self._attr_available = False
 
-    @property
-    def name(self) -> str:
-        """Return name."""
-        return self._name
 
-    @property
-    def ping_interval(self) -> int:
-        """Get ping_interval."""
-        return str(self._ping_interval)
+class SIABinarySensorMoisture(SIABinarySensorBase):
+    """Class for Moisture Binary Sensors."""
 
-    @property
-    def unique_id(self) -> str:
-        """Return unique id."""
-        return self._unique_id
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        account_data: dict[str, Any],
+        zone: int,
+    ) -> None:
+        """Initialize a Moisture binary sensor."""
+        super().__init__(entry, account_data, zone, DEVICE_CLASS_MOISTURE)
+        self._attr_entity_registry_enabled_default = False
 
-    @property
-    def account(self) -> str:
-        """Return device account."""
-        return self._account
+    def update_state(self, sia_event: SIAEvent) -> None:
+        """Update the state of the binary sensor."""
+        new_state = MOISTURE_CODE_CONSEQUENCES.get(sia_event.code, None)
+        if new_state is not None:
+            _LOGGER.debug("New state will be %s", new_state)
+            self._attr_is_on = new_state
 
-    @property
-    def available(self) -> bool:
-        """Return avalability."""
-        return self._is_available
 
-    @property
-    def device_state_attributes(self) -> dict:
-        """Return attributes."""
-        return self._attr
+class SIABinarySensorSmoke(SIABinarySensorBase):
+    """Class for Smoke Binary Sensors."""
 
-    @property
-    def device_class(self) -> str:
-        """Return device class."""
-        return self._device_class
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        account_data: dict[str, Any],
+        zone: int,
+    ) -> None:
+        """Initialize a Smoke binary sensor."""
+        super().__init__(entry, account_data, zone, DEVICE_CLASS_SMOKE)
+        self._attr_entity_registry_enabled_default = False
 
-    @property
-    def state(self) -> str:
-        """Return the state of the binary sensor."""
-        if self.is_on is None:
-            return STATE_UNKNOWN
-        return STATE_ON if self.is_on else STATE_OFF
+    def update_state(self, sia_event: SIAEvent) -> None:
+        """Update the state of the binary sensor."""
+        new_state = SMOKE_CODE_CONSEQUENCES.get(sia_event.code, None)
+        if new_state is not None:
+            _LOGGER.debug("New state will be %s", new_state)
+            self._attr_is_on = new_state
 
-    @property
-    def is_on(self) -> bool:
-        """Return true if the binary sensor is on."""
-        return self._is_on
 
-    @property
-    def should_poll(self) -> bool:
-        """Return True if entity has to be polled for state.
+class SIABinarySensorPower(SIABinarySensorBase):
+    """Class for Power Binary Sensors."""
 
-        False if entity pushes its state to HA.
-        """
-        return False
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        account_data: dict[str, Any],
+    ) -> None:
+        """Initialize a Power binary sensor."""
+        super().__init__(entry, account_data, SIA_HUB_ZONE, DEVICE_CLASS_POWER)
+        self._attr_entity_registry_enabled_default = True
 
-    @state.setter
-    def state(self, new_on: bool):
-        """Set state."""
-        self._is_on = new_on
-        if not self.registry_entry.disabled:
-            self.async_schedule_update_ha_state()
-
-    async def assume_available(self):
-        """Reset unavalability tracker."""
-        if not self.registry_entry.disabled:
-            await self._async_track_unavailable()
-
-    @callback
-    async def _async_track_unavailable(self) -> bool:
-        """Track availability."""
-        if self._remove_unavailability_tracker:
-            self._remove_unavailability_tracker()
-        self._remove_unavailability_tracker = async_track_point_in_utc_time(
-            self.hass,
-            self._async_set_unavailable,
-            utcnow() + self._ping_interval + PING_INTERVAL_MARGIN,
-        )
-        if not self._is_available:
-            self._is_available = True
-            return True
-        return False
-
-    @callback
-    def _async_set_unavailable(self, now):
-        """Set unavailable."""
-        self._remove_unavailability_tracker = None
-        self._is_available = False
-        self.async_schedule_update_ha_state()
-
-    @property
-    def device_info(self) -> dict:
-        """Return the device_info."""
-        return {
-            "identifiers": {(DOMAIN, self.unique_id)},
-            "name": self.name,
-            "via_device": (DOMAIN, self._port, self._account),
-        }
+    def update_state(self, sia_event: SIAEvent) -> None:
+        """Update the state of the binary sensor."""
+        new_state = POWER_CODE_CONSEQUENCES.get(sia_event.code, None)
+        if new_state is not None:
+            _LOGGER.debug("New state will be %s", new_state)
+            self._attr_is_on = new_state

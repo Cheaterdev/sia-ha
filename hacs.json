@@ -1,4 +1,4 @@
 {
     "name": "SIA",
-    "domains": ["binary_sensor"]
+    "domains": ["binary_sensor", "alarm_control_panel", "sensor"]
 }
