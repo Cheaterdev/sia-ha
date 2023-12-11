@@ -1,3 +1,4 @@
+[![Stand With Ukraine](https://raw.githubusercontent.com/vshymanskyy/StandWithUkraine/main/banner-direct-single.svg)](https://stand-with-ukraine.pp.ua)
 ## OFFICIAL INTEGRATION IS NOW IN HA!
 
 Make sure to delete the current integraiton, in your Integrations page, then delete the HACS custom component, reboot and then input your config in the official 
